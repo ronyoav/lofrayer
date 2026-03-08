@@ -13,8 +13,12 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
       className="block rounded-2xl bg-card shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden group"
     >
       <div className="p-4 flex items-start gap-4">
-        <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-accent flex items-center justify-center text-3xl">
-          {discount.brandLogo}
+        <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-accent flex items-center justify-center overflow-hidden">
+          <img
+            src={discount.brandLogo}
+            alt={discount.brand}
+            className="w-12 h-12 object-contain"
+          />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-1">

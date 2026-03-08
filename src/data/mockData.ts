@@ -1,3 +1,16 @@
+import nikeLogo from "@/assets/brands/nike.png";
+import castroLogo from "@/assets/brands/castro.png";
+import superpharmLogo from "@/assets/brands/superpharm.png";
+import mcdonaldsLogo from "@/assets/brands/mcdonalds.png";
+import golfLogo from "@/assets/brands/golf.png";
+import cinemacityLogo from "@/assets/brands/cinemacity.png";
+import pizzahutLogo from "@/assets/brands/pizzahut.png";
+import aceLogo from "@/assets/brands/ace.png";
+import renuarLogo from "@/assets/brands/renuar.png";
+import holmesplaceLogo from "@/assets/brands/holmesplace.png";
+import foxLogo from "@/assets/brands/fox.png";
+import shufersalLogo from "@/assets/brands/shufersal.png";
+
 export type Membership = {
   id: string;
   name: string;
@@ -33,11 +46,26 @@ export const MEMBERSHIPS: Membership[] = [
   { id: "hofesh", name: "הופש", logo: "🌴", color: "#F57C00" },
 ];
 
+export const BRAND_LOGOS: Record<string, string> = {
+  "נייקי": nikeLogo,
+  "קסטרו": castroLogo,
+  "סופר-פארם": superpharmLogo,
+  "מקדונלד׳ס": mcdonaldsLogo,
+  "גולף": golfLogo,
+  "סינמה סיטי": cinemacityLogo,
+  "פיצה האט": pizzahutLogo,
+  "אייס": aceLogo,
+  "רנואר": renuarLogo,
+  "הולמס פלייס": holmesplaceLogo,
+  "FOX": foxLogo,
+  "שופרסל": shufersalLogo,
+};
+
 export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "1",
     brand: "נייקי",
-    brandLogo: "👟",
+    brandLogo: nikeLogo,
     title: "10% הנחה על כל הקולקציה",
     description: "הנחה על כל מוצרי נייקי בחנויות ובאונליין",
     discountValue: "10%",
@@ -50,7 +78,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "2",
     brand: "קסטרו",
-    brandLogo: "👔",
+    brandLogo: castroLogo,
     title: "15% הנחה לחברי כאל",
     description: "הנחה על קולקציית החורף בכל הסניפים",
     discountValue: "15%",
@@ -63,7 +91,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "3",
     brand: "סופר-פארם",
-    brandLogo: "💊",
+    brandLogo: superpharmLogo,
     title: "20% הנחה על מוצרי טיפוח",
     description: "הנחה על מגוון מוצרי טיפוח נבחרים",
     discountValue: "20%",
@@ -76,7 +104,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "4",
     brand: "מקדונלד׳ס",
-    brandLogo: "🍔",
+    brandLogo: mcdonaldsLogo,
     title: "ארוחה ב-50₪ במקום 70₪",
     description: "ארוחת ביג מק משפחתית בהנחה",
     discountValue: "29%",
@@ -89,7 +117,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "5",
     brand: "גולף",
-    brandLogo: "👕",
+    brandLogo: golfLogo,
     title: "25% הנחה על פריט שני",
     description: "על כל הקולקציה החדשה",
     discountValue: "25%",
@@ -102,7 +130,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "6",
     brand: "סינמה סיטי",
-    brandLogo: "🎬",
+    brandLogo: cinemacityLogo,
     title: "כרטיס קולנוע ב-29.90₪",
     description: "כרטיס מוזל לכל סרט בכל יום",
     discountValue: "29.90₪",
@@ -115,7 +143,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "7",
     brand: "פיצה האט",
-    brandLogo: "🍕",
+    brandLogo: pizzahutLogo,
     title: "1+1 על פיצה משפחתית",
     description: "אחד פלוס אחד על כל פיצה משפחתית",
     discountValue: "1+1",
@@ -128,7 +156,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "8",
     brand: "אייס",
-    brandLogo: "🏠",
+    brandLogo: aceLogo,
     title: "10% הנחה על מוצרי חשמל",
     description: "על מוצרי חשמל נבחרים בלבד",
     discountValue: "10%",
@@ -141,7 +169,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "9",
     brand: "רנואר",
-    brandLogo: "👗",
+    brandLogo: renuarLogo,
     title: "20% הנחה לחברי מקס",
     description: "על כל החנות כולל מבצעים",
     discountValue: "20%",
@@ -154,7 +182,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "10",
     brand: "הולמס פלייס",
-    brandLogo: "🏋️",
+    brandLogo: holmesplaceLogo,
     title: "חודש ראשון חינם",
     description: "הרשמה עם חודש ניסיון חינם",
     discountValue: "חינם",
@@ -167,7 +195,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "11",
     brand: "FOX",
-    brandLogo: "🦊",
+    brandLogo: foxLogo,
     title: "30% הנחה על קולקציית קיץ",
     description: "הנחה על כל פריטי הקיץ",
     discountValue: "30%",
@@ -180,7 +208,7 @@ export const MOCK_DISCOUNTS: Discount[] = [
   {
     id: "12",
     brand: "שופרסל",
-    brandLogo: "🛒",
+    brandLogo: shufersalLogo,
     title: "5% הנחה על קניה מעל 300₪",
     description: "בכל סניפי שופרסל",
     discountValue: "5%",
