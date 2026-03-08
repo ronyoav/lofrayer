@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             url: membership.scrape_url,
-            formats: ['markdown'],
+            formats: ['markdown', 'links'],
             onlyMainContent: true,
           }),
         });
