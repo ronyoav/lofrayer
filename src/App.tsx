@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import OnboardingPage from "./pages/OnboardingPage";
 import DashboardPage from "./pages/DashboardPage";
 import NotFound from "./pages/NotFound";
+import AdminPage from "./pages/AdminPage";
 
 const queryClient = new QueryClient();
 
