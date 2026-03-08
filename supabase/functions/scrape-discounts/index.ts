@@ -191,6 +191,56 @@ async function scrapeWithFirecrawl(apiKey: string, url: string): Promise<ScrapeC
   }
 }
 
+// ─── Strategy 1.5: Scrape with actions (click buttons, scroll, screenshot) ───
+
+async function scrapeWithActions(apiKey: string, url: string): Promise<ScrapeContent> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        formats: ['markdown', 'screenshot', 'links'],
+        waitFor: 3000,
+        actions: [
+          // Wait for page to fully load
+          { type: 'wait', milliseconds: 2000 },
+          // Try clicking common "show all" / "load more" buttons in Hebrew
+          { type: 'click', selector: 'button:has-text("הצג הכל")', all: true },
+          { type: 'click', selector: 'button:has-text("טען עוד")', all: true },
+          { type: 'click', selector: 'button:has-text("הצג עוד")', all: true },
+          { type: 'click', selector: 'a:has-text("הצג הכל")', all: true },
+          { type: 'click', selector: '[class*="show-all"]', all: true },
+          { type: 'click', selector: '[class*="load-more"]', all: true },
+          { type: 'wait', milliseconds: 2000 },
+          // Scroll down to load lazy content
+          { type: 'scroll', direction: 'down' },
+          { type: 'wait', milliseconds: 1000 },
+          { type: 'scroll', direction: 'down' },
+          { type: 'wait', milliseconds: 1000 },
+          // Take a full-page screenshot
+          { type: 'screenshot', fullPage: true },
+        ],
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('Actions scrape error:', data.error);
+      return {};
+    }
+
+    const screenshot = data.data?.actions?.screenshots?.[0] || data.data?.screenshot || null;
+    return {
+      markdown: data.data?.markdown || data.markdown || '',
+      links: data.data?.links || data.links || [],
+      screenshot,
+    };
+  } catch (err) {
+    console.error('Actions scrape error:', err);
+    return {};
+  }
+}
+
 // ─── Strategy 2: Screenshot + AI vision for JS-heavy sites ───
 
 async function scrapeWithScreenshot(apiKey: string, url: string): Promise<ScrapeContent> {
