@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2 } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CATEGORIES, LOCATIONS } from "@/data/mockData";
 import {
