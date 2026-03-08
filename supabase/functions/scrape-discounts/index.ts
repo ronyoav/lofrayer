@@ -301,7 +301,8 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
   const linksText = links.slice(0, 100).join('\n');
 
   const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
-חלץ את כל ההנחות וההטבות מהתוכן הבא והחזר אותן כ-JSON array.
+חלץ רק הנחות צרכניות אמיתיות (מותגים, חנויות, מסעדות, בתי קולנוע, חופשות וכו').
+אל תכלול מענקים ממשלתיים, תגמולים, סיוע כלכלי או זכאויות.
 
 כל הנחה צריכה לכלול:
 - brand: שם המותג/בית העסק (בעברית)
@@ -315,7 +316,7 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
 רשימת הלינקים שנמצאו בדף:
 ${linksText}
 
-החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].
+החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות צרכניות, החזר [].`;
 
 התוכן:
 ${truncatedContent}`;
