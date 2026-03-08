@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
                 discount_value: d.discount_value,
                 category: d.category || 'כללי',
                 location: d.location || 'כל הארץ',
-                redeem_url: d.redeem_url || membership.website_url || null,
+                redeem_url: d.redeem_url || membership.scrape_url || membership.website_url || null,
                 membership_id: membership.id,
                 scraped_at: new Date().toISOString(),
                 is_active: true,
