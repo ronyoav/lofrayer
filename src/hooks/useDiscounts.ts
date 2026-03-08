@@ -27,6 +27,8 @@ export type DbMembership = {
   name: string;
   logo_url: string | null;
   color: string | null;
+  scrape_url: string | null;
+  website_url: string | null;
 };
 
 export function useDiscounts(membershipSlugs: string[]) {
