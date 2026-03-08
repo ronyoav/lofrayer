@@ -85,6 +85,7 @@ Deno.serve(async (req) => {
         }
 
         const markdown = scrapeData.data?.markdown || scrapeData.markdown || '';
+        const links = scrapeData.data?.links || scrapeData.links || [];
 
         if (!markdown || markdown.length < 50) {
           results.push({
@@ -96,10 +97,10 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        console.log(`Got ${markdown.length} chars for ${membership.name}, sending to AI...`);
+        console.log(`Got ${markdown.length} chars and ${links.length} links for ${membership.name}, sending to AI...`);
 
         // Step 2: Parse with AI
-        const discounts = await parseWithAI(lovableApiKey, markdown, membership);
+        const discounts = await parseWithAI(lovableApiKey, markdown, membership, links);
 
         if (discounts.length > 0) {
           // Step 3: Upsert into database
