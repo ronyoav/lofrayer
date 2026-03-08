@@ -173,9 +173,10 @@ Deno.serve(async (req) => {
   }
 });
 
-async function parseWithAI(apiKey: string, markdown: string, membership: any): Promise<any[]> {
+async function parseWithAI(apiKey: string, markdown: string, membership: any, links: string[]): Promise<any[]> {
   // Truncate to avoid token limits
   const truncatedContent = markdown.substring(0, 8000);
+  const linksText = links.slice(0, 100).join('\n');
 
   const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
 חלץ את כל ההנחות וההטבות מהתוכן הבא והחזר אותן כ-JSON array.
@@ -187,9 +188,13 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any): P
 - discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה", "חינם")
 - category: קטגוריה (אחת מ: אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
 - location: מיקום אם מצוין (או "כל הארץ")
+- redeem_url: הלינק הספציפי למימוש ההטבה אם קיים בתוכן או ברשימת הלינקים (לא הדף הראשי של האתר!)
+
+רשימת הלינקים שנמצאו בדף:
+${linksText}
 
 החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].
-דוגמה: [{"brand": "נייקי", "title": "20% הנחה על כל הקולקציה", "description": "הנחה בכל הסניפים", "discount_value": "20%", "category": "אופנה", "location": "כל הארץ"}]
+דוגמה: [{"brand": "נייקי", "title": "20% הנחה על כל הקולקציה", "description": "הנחה בכל הסניפים", "discount_value": "20%", "category": "אופנה", "location": "כל הארץ", "redeem_url": "https://example.com/benefit/nike"}]
 
 התוכן:
 ${truncatedContent}`;
