@@ -1,18 +1,32 @@
 import { useState } from "react";
 import { MapPin, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MEMBERSHIPS } from "@/data/mockData";
 import {
   setSelectedMemberships,
   setOnboardingComplete,
   setLocationEnabled,
 } from "@/lib/storage";
 import { useNavigate } from "react-router-dom";
+import { useMemberships } from "@/hooks/useDiscounts";
+
+const MEMBERSHIP_EMOJIS: Record<string, string> = {
+  "behatzada": "🎖️",
+  "cal": "💳",
+  "bank-hapoalim": "🏦",
+  "histadrut-morim": "📚",
+  "hever": "🤝",
+  "max": "💳",
+  "iscard": "💳",
+  "clalit": "🏥",
+  "maccabi": "🏥",
+  "hofesh": "🌴",
+};
 
 const OnboardingPage = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<"location" | "memberships">("location");
   const [selected, setSelected] = useState<string[]>([]);
+  const { data: memberships = [], isLoading } = useMemberships();
 
   const handleLocationPermission = (allow: boolean) => {
     setLocationEnabled(allow);
@@ -22,9 +36,9 @@ const OnboardingPage = () => {
     setStep("memberships");
   };
 
-  const toggleMembership = (id: string) => {
+  const toggleMembership = (slug: string) => {
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+      prev.includes(slug) ? prev.filter((m) => m !== slug) : [...prev, slug]
     );
   };
 
@@ -41,9 +55,7 @@ const OnboardingPage = () => {
           <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-accent">
             <MapPin className="h-12 w-12 text-primary" />
           </div>
-          <h1 className="mb-3 text-3xl font-bold text-foreground">
-            שירותי מיקום
-          </h1>
+          <h1 className="mb-3 text-3xl font-bold text-foreground">שירותי מיקום</h1>
           <p className="mb-8 text-lg text-muted-foreground leading-relaxed">
             נשתמש במיקום שלך כדי למצוא הנחות והטבות בסניפים קרובים אליך
           </p>
@@ -87,27 +99,34 @@ const OnboardingPage = () => {
           בחר/י את כל המנויים שלך כדי שנמצא לך את כל ההנחות
         </p>
 
-        <div className="grid grid-cols-2 gap-3 mb-8">
-          {MEMBERSHIPS.map((m) => {
-            const isSelected = selected.includes(m.id);
-            return (
-              <button
-                key={m.id}
-                onClick={() => toggleMembership(m.id)}
-                className={`flex items-center gap-3 rounded-xl p-4 text-right transition-all duration-200 ${
-                  isSelected
-                    ? "bg-accent border-2 border-primary shadow-card"
-                    : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-                }`}
-              >
-                <span className="text-2xl">{m.logo}</span>
-                <span className="text-sm font-medium text-foreground leading-tight">
-                  {m.name}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        {isLoading ? (
+          <div className="py-8 text-center">
+            <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" />
+            <p className="text-muted-foreground">טוען מנויים...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 mb-8">
+            {memberships.map((m) => {
+              const isSelected = selected.includes(m.slug);
+              return (
+                <button
+                  key={m.slug}
+                  onClick={() => toggleMembership(m.slug)}
+                  className={`flex items-center gap-3 rounded-xl p-4 text-right transition-all duration-200 ${
+                    isSelected
+                      ? "bg-accent border-2 border-primary shadow-card"
+                      : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+                  }`}
+                >
+                  <span className="text-2xl">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
+                  <span className="text-sm font-medium text-foreground leading-tight">
+                    {m.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <Button
           size="lg"
