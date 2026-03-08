@@ -82,7 +82,15 @@ const OnboardingPage = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<"location" | "memberships">("location");
   const [selected, setSelected] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const { data: memberships = [], isLoading } = useMemberships();
+
+  const filteredMemberships = useMemo(() => {
+    if (!searchQuery) return memberships;
+    return memberships.filter((m) =>
+      m.name.includes(searchQuery) || m.slug.includes(searchQuery.toLowerCase())
+    );
+  }, [memberships, searchQuery]);
 
   const handleLocationPermission = (allow: boolean) => {
     setLocationEnabled(allow);
