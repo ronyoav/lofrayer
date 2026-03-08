@@ -112,12 +112,14 @@ ${category_hint ? `הקטגוריה הצפויה: ${category_hint}` : ''}
     console.log(`Total discounts extracted: ${allDiscounts.length}`);
 
     if (allDiscounts.length > 0) {
-      // Deactivate old scraped discounts for this membership
-      await supabase
-        .from('discounts')
-        .update({ is_active: false })
-        .eq('membership_id', membership.id)
-        .not('scraped_at', 'is', null);
+      // Only deactivate if skip_deactivate is not set
+      if (!body?.skip_deactivate) {
+        await supabase
+          .from('discounts')
+          .update({ is_active: false })
+          .eq('membership_id', membership.id)
+          .not('scraped_at', 'is', null);
+      }
 
       const { error: insertError } = await supabase
         .from('discounts')
