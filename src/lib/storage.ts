@@ -1,7 +1,4 @@
-import { create } from 'zustand';
-
-// Simple state management without zustand dependency - using React context pattern instead
-// We'll use localStorage for persistence
+// Simple localStorage-based persistence for user preferences
 
 export const getSelectedMemberships = (): string[] => {
   const stored = localStorage.getItem('lofrayer-memberships');
