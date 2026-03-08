@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2 } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CATEGORIES, LOCATIONS } from "@/data/mockData";
 import {
@@ -115,6 +115,13 @@ const DashboardPage = () => {
               </p>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={() => navigate("/admin")}
+                className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
+                title="ניהול הנחות"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
               <button
                 onClick={handleScrapeAll}
                 disabled={isScraping}
