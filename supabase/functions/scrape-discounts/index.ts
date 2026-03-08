@@ -31,11 +31,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Optionally filter by specific membership slug
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug;
 
-    // Get memberships with scrape URLs
     let query = supabase
       .from('memberships')
       .select('*')
@@ -55,63 +53,50 @@ Deno.serve(async (req) => {
 
     for (const membership of memberships || []) {
       try {
-        console.log(`Scraping benefits for ${membership.name} from ${membership.scrape_url}`);
+        console.log(`Processing ${membership.name}...`);
 
-        // Step 1: Scrape with Firecrawl
-        const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${firecrawlKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: membership.scrape_url,
-            formats: ['markdown', 'links'],
-            onlyMainContent: true,
-          }),
-        });
+        // Strategy 1: Scrape with waitFor for JS-heavy sites
+        let content = await scrapeWithFirecrawl(firecrawlKey, membership.scrape_url);
+        let strategy = 'scrape';
 
-        const scrapeData = await scrapeResponse.json();
-
-        if (!scrapeResponse.ok) {
-          console.error(`Failed to scrape ${membership.name}:`, scrapeData);
-          results.push({
-            membership: membership.name,
-            slug: membership.slug,
-            status: 'scrape_error',
-            error: scrapeData.error || `HTTP ${scrapeResponse.status}`,
-          });
-          continue;
+        // Strategy 2: If scrape returned too little, try with screenshot + AI vision
+        if (!content.markdown || content.markdown.length < 50) {
+          console.log(`Strategy 1 failed for ${membership.name}, trying screenshot...`);
+          content = await scrapeWithScreenshot(firecrawlKey, membership.scrape_url);
+          strategy = 'screenshot';
         }
 
-        const markdown = scrapeData.data?.markdown || scrapeData.markdown || '';
-        const links = scrapeData.data?.links || scrapeData.links || [];
+        // Strategy 3: If still nothing, search the web for benefits
+        if ((!content.markdown || content.markdown.length < 50) && !content.screenshot) {
+          console.log(`Strategy 2 failed for ${membership.name}, trying web search...`);
+          content = await searchForBenefits(firecrawlKey, membership.name);
+          strategy = 'search';
+        }
 
-        if (!markdown || markdown.length < 50) {
+        if ((!content.markdown || content.markdown.length < 50) && !content.screenshot) {
           results.push({
             membership: membership.name,
             slug: membership.slug,
             status: 'no_content',
-            contentLength: markdown.length,
+            strategies_tried: strategy,
           });
           continue;
         }
 
-        console.log(`Got ${markdown.length} chars and ${links.length} links for ${membership.name}, sending to AI...`);
+        console.log(`Got content for ${membership.name} via ${strategy} (${content.markdown?.length || 0} chars markdown, screenshot: ${!!content.screenshot})`);
 
-        // Step 2: Parse with AI
-        const discounts = await parseWithAI(lovableApiKey, markdown, membership, links);
+        // Parse with AI
+        const discounts = content.screenshot
+          ? await parseScreenshotWithAI(lovableApiKey, content.screenshot, membership)
+          : await parseWithAI(lovableApiKey, content.markdown!, membership, content.links || []);
 
         if (discounts.length > 0) {
-          // Step 3: Upsert into database
-          // First deactivate old scraped discounts for this membership
           await supabase
             .from('discounts')
             .update({ is_active: false })
             .eq('membership_id', membership.id)
             .not('scraped_at', 'is', null);
 
-          // Insert new ones
           const { error: insertError } = await supabase
             .from('discounts')
             .insert(
@@ -130,14 +115,8 @@ Deno.serve(async (req) => {
             );
 
           if (insertError) {
-            console.error(`Failed to insert discounts for ${membership.name}:`, insertError);
-            results.push({
-              membership: membership.name,
-              slug: membership.slug,
-              status: 'insert_error',
-              error: insertError.message,
-              discountsFound: discounts.length,
-            });
+            console.error(`Insert error for ${membership.name}:`, insertError);
+            results.push({ membership: membership.name, slug: membership.slug, status: 'insert_error', error: insertError.message, discountsFound: discounts.length });
             continue;
           }
         }
@@ -146,8 +125,8 @@ Deno.serve(async (req) => {
           membership: membership.name,
           slug: membership.slug,
           status: 'success',
+          strategy,
           discountsFound: discounts.length,
-          contentLength: markdown.length,
         });
       } catch (err) {
         console.error(`Error processing ${membership.name}:`, err);
@@ -173,8 +152,94 @@ Deno.serve(async (req) => {
   }
 });
 
+// ─── Strategy 1: Standard scrape with waitFor ───
+
+type ScrapeContent = {
+  markdown?: string;
+  links?: string[];
+  screenshot?: string;
+};
+
+async function scrapeWithFirecrawl(apiKey: string, url: string): Promise<ScrapeContent> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        formats: ['markdown', 'links'],
+        onlyMainContent: true,
+        waitFor: 3000, // Wait 3s for JS to render
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) return {};
+    return {
+      markdown: data.data?.markdown || data.markdown || '',
+      links: data.data?.links || data.links || [],
+    };
+  } catch (err) {
+    console.error('Scrape error:', err);
+    return {};
+  }
+}
+
+// ─── Strategy 2: Screenshot + AI vision for JS-heavy sites ───
+
+async function scrapeWithScreenshot(apiKey: string, url: string): Promise<ScrapeContent> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        formats: ['screenshot', 'markdown'],
+        waitFor: 5000,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) return {};
+    return {
+      screenshot: data.data?.screenshot || data.screenshot || null,
+      markdown: data.data?.markdown || data.markdown || '',
+    };
+  } catch (err) {
+    console.error('Screenshot error:', err);
+    return {};
+  }
+}
+
+// ─── Strategy 3: Web search for benefits ───
+
+async function searchForBenefits(apiKey: string, membershipName: string): Promise<ScrapeContent> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/search', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `${membershipName} הטבות הנחות 2026`,
+        limit: 5,
+        scrapeOptions: { formats: ['markdown'] },
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) return {};
+    
+    // Combine markdown from all search results
+    const allMarkdown = (data.data || [])
+      .map((r: any) => `## ${r.title || ''}\n${r.markdown || r.description || ''}`)
+      .join('\n\n');
+    
+    return { markdown: allMarkdown };
+  } catch (err) {
+    console.error('Search error:', err);
+    return {};
+  }
+}
+
+// ─── AI Parsing: Text-based ───
+
 async function parseWithAI(apiKey: string, markdown: string, membership: any, links: string[]): Promise<any[]> {
-  // Truncate to avoid token limits
   const truncatedContent = markdown.substring(0, 8000);
   const linksText = links.slice(0, 100).join('\n');
 
@@ -188,29 +253,60 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
 - discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה", "חינם")
 - category: קטגוריה (אחת מ: אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
 - location: מיקום אם מצוין (או "כל הארץ")
-- redeem_url: הלינק הספציפי למימוש ההטבה אם קיים בתוכן או ברשימת הלינקים (לא הדף הראשי של האתר!)
+- redeem_url: הלינק הספציפי למימוש ההטבה אם קיים ברשימת הלינקים (לא הדף הראשי!)
 
 רשימת הלינקים שנמצאו בדף:
 ${linksText}
 
 החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].
-דוגמה: [{"brand": "נייקי", "title": "20% הנחה על כל הקולקציה", "description": "הנחה בכל הסניפים", "discount_value": "20%", "category": "אופנה", "location": "כל הארץ", "redeem_url": "https://example.com/benefit/nike"}]
 
 התוכן:
 ${truncatedContent}`;
 
+  return await callAI(apiKey, [{ role: 'user', content: prompt }]);
+}
+
+// ─── AI Parsing: Screenshot (vision) ───
+
+async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
+  const prompt = `אתה מנתח צילום מסך של דף הטבות מאתר מועדון "${membership.name}".
+חלץ את כל ההנחות וההטבות שאתה רואה בתמונה והחזר אותן כ-JSON array.
+
+כל הנחה צריכה לכלול:
+- brand: שם המותג/בית העסק (בעברית)
+- title: כותרת ההנחה (קצרה וברורה)
+- description: תיאור קצר
+- discount_value: ערך ההנחה
+- category: קטגוריה (אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
+- location: מיקום אם מצוין (או "כל הארץ")
+
+החזר רק JSON array תקני, ללא טקסט נוסף.`;
+
+  const imageUrl = screenshotBase64.startsWith('http') 
+    ? screenshotBase64 
+    : `data:image/png;base64,${screenshotBase64}`;
+
+  return await callAI(apiKey, [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: imageUrl } },
+      ],
+    },
+  ]);
+}
+
+// ─── Shared AI call ───
+
+async function callAI(apiKey: string, messages: any[]): Promise<any[]> {
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        messages,
         temperature: 0.1,
       }),
     });
@@ -223,8 +319,6 @@ ${truncatedContent}`;
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
-
-    // Extract JSON from response (might be wrapped in ```json blocks)
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       console.log('No JSON array found in AI response');
@@ -232,7 +326,6 @@ ${truncatedContent}`;
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-    console.log(`AI extracted ${parsed.length} discounts for ${membership.name}`);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.error('AI parsing error:', err);
