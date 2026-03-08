@@ -328,7 +328,7 @@ ${truncatedContent}`;
 
 async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
   const prompt = `אתה מנתח צילום מסך של דף הטבות מאתר מועדון "${membership.name}".
-חלץ את כל ההנחות וההטבות שאתה רואה בתמונה והחזר אותן כ-JSON array.
+חלץ רק הנחות צרכניות (מותגים, חנויות, מסעדות, קולנוע, חופשות). אל תכלול מענקים ממשלתיים או תגמולים.
 
 כל הנחה צריכה לכלול:
 - brand: שם המותג/בית העסק (בעברית)
