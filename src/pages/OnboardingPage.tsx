@@ -10,16 +10,59 @@ import { useNavigate } from "react-router-dom";
 import { useMemberships } from "@/hooks/useDiscounts";
 
 const MEMBERSHIP_EMOJIS: Record<string, string> = {
+  // צבא וביטחון
   "behatzada": "🎖️",
-  "cal": "💳",
-  "bank-hapoalim": "🏦",
-  "histadrut-morim": "📚",
   "hever": "🤝",
+  "idf-disabled": "🎗️",
+  "police": "👮",
+  // בנקים
+  "bank-hapoalim": "🏦",
+  "bank-leumi": "🏦",
+  "bank-discount": "🏦",
+  "bank-mizrahi": "🏦",
+  "bank-yahav": "🏦",
+  "bank-benleumi": "🏦",
+  "poalim-wonder": "✨",
+  "mafteah-discount": "🔑",
+  // כרטיסי אשראי
+  "cal": "💳",
   "max": "💳",
   "iscard": "💳",
+  "visa-cal": "💳",
+  "isracard-benefits": "💳",
+  // קופות חולים
   "clalit": "🏥",
   "maccabi": "🏥",
+  "leumit": "🏥",
+  "meuhedet": "🏥",
+  // הסתדרויות
+  "histadrut": "✊",
+  "histadrut-morim": "📚",
+  "histadrut-medina": "🏛️",
+  "histadrut-refuit": "⚕️",
+  // תקשורת ואנרגיה
+  "hot-club": "📺",
+  "partner": "📱",
+  "cellcom": "📱",
+  "pelephone": "📱",
+  "yellow-paz": "⛽",
+  "sonol": "⛽",
+  // ביטוח
+  "migdal": "🛡️",
+  "harel": "🛡️",
+  "menora": "🛡️",
+  "clal-insurance": "🛡️",
+  // מועדוני צרכנות
+  "face": "😊",
+  "clubhub": "🎯",
+  "pais-plus": "🎰",
   "hofesh": "🌴",
+  // לשכות
+  "lishkat-orchei-din": "⚖️",
+  "lishkat-roei-heshbon": "📊",
+  // רשתות
+  "rami-levy-club": "🛒",
+  "shufersal-club": "🛒",
 };
 
 const OnboardingPage = () => {
