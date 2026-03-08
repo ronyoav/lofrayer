@@ -116,6 +116,13 @@ const DashboardPage = () => {
             </div>
             <div className="flex gap-2">
               <button
+                onClick={() => navigate("/admin")}
+                className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
+                title="ניהול הנחות"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
+              <button
                 onClick={handleScrapeAll}
                 disabled={isScraping}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
