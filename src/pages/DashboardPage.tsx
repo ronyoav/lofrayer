@@ -77,7 +77,8 @@ const DashboardPage = () => {
   const handleScrapeOne = async (slug: string, name: string) => {
     setScrapingSlug(slug);
     try {
-      const { data, error } = await supabase.functions.invoke('scrape-discounts', {
+      // Try Bright Data first (Israeli proxy), fallback to Firecrawl
+      const { data, error } = await supabase.functions.invoke('scrape-brightdata', {
         body: { slug },
       });
       if (error) throw error;
