@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { MapPin, ChevronLeft } from "lucide-react";
+import { useState, useMemo } from "react";
+import { MapPin, ChevronLeft, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   setSelectedMemberships,
   setOnboardingComplete,
@@ -8,6 +9,18 @@ import {
 } from "@/lib/storage";
 import { useNavigate } from "react-router-dom";
 import { useMemberships } from "@/hooks/useDiscounts";
+
+const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
+  "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
+  "💳 כרטיסי אשראי": ["cal", "max", "iscard", "visa-cal", "isracard-benefits"],
+  "🏥 קופות חולים": ["clalit", "maccabi", "leumit", "meuhedet"],
+  "🎖️ צבא וביטחון": ["behatzada", "hever", "idf-disabled", "police"],
+  "✊ הסתדרויות": ["histadrut", "histadrut-morim", "histadrut-medina", "histadrut-refuit"],
+  "📱 תקשורת ואנרגיה": ["hot-club", "partner", "cellcom", "pelephone", "yellow-paz", "sonol"],
+  "🛡️ ביטוח": ["migdal", "harel", "menora", "clal-insurance"],
+  "🛒 מועדוני צרכנות": ["face", "clubhub", "pais-plus", "hofesh", "rami-levy-club", "shufersal-club"],
+  "⚖️ לשכות מקצועיות": ["lishkat-orchei-din", "lishkat-roei-heshbon"],
+};
 
 const MEMBERSHIP_EMOJIS: Record<string, string> = {
   // צבא וביטחון
