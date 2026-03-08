@@ -34,7 +34,6 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
 
-    // Get membership
     const { data: membership, error: membershipError } = await supabase
       .from('memberships')
       .select('*')
@@ -51,32 +50,40 @@ Deno.serve(async (req) => {
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
     console.log(`Starting Browserless scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // Use Browserless to navigate, scroll, and take screenshots
-    const screenshots = await captureWithBrowserless(browserlessKey, scrapeUrl);
-    console.log(`Captured ${screenshots.length} screenshots`);
+    // Strategy 1: Try /unblock API (best for anti-bot sites)
+    let screenshots = await captureWithUnblock(browserlessKey, scrapeUrl);
+    
+    // Strategy 2: Full page screenshot
+    if (screenshots.length === 0) {
+      console.log('Unblock failed, trying direct screenshot...');
+      screenshots = await captureDirectScreenshot(browserlessKey, scrapeUrl);
+    }
+
+    // Strategy 3: /function with scroll captures
+    if (screenshots.length === 0) {
+      console.log('Direct screenshot failed, trying function with scroll...');
+      screenshots = await captureWithFunction(browserlessKey, scrapeUrl);
+    }
+
+    console.log(`Total screenshots captured: ${screenshots.length}`);
 
     if (screenshots.length === 0) {
       return new Response(
-        JSON.stringify({ success: false, error: 'No screenshots captured' }),
+        JSON.stringify({ success: false, error: 'No screenshots captured from any strategy' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Process each screenshot with AI vision
+    // Process screenshots with AI vision
     const allDiscounts: any[] = [];
-
     for (let i = 0; i < screenshots.length; i++) {
       console.log(`Processing screenshot ${i + 1}/${screenshots.length}...`);
       const discounts = await parseScreenshotWithAI(lovableApiKey, screenshots[i], membership);
       allDiscounts.push(...discounts);
-
-      // Delay between AI calls
-      if (i < screenshots.length - 1) {
-        await new Promise(r => setTimeout(r, 1000));
-      }
+      if (i < screenshots.length - 1) await new Promise(r => setTimeout(r, 1000));
     }
 
-    // Deduplicate by brand+title
+    // Deduplicate
     const seen = new Set<string>();
     const uniqueDiscounts = allDiscounts.filter(d => {
       const key = `${d.brand}|${d.title}`.toLowerCase();
@@ -88,14 +95,12 @@ Deno.serve(async (req) => {
     console.log(`Total unique discounts: ${uniqueDiscounts.length}`);
 
     if (uniqueDiscounts.length > 0) {
-      // Deactivate old scraped discounts
       await supabase
         .from('discounts')
         .update({ is_active: false })
         .eq('membership_id', membership.id)
         .not('scraped_at', 'is', null);
 
-      // Insert new discounts
       const { error: insertError } = await supabase
         .from('discounts')
         .insert(
@@ -140,157 +145,158 @@ Deno.serve(async (req) => {
   }
 });
 
-// ─── Browserless: Navigate, scroll, screenshot ───
+const BROWSERLESS_BASE = 'https://production-sfo.browserless.io';
 
-async function captureWithBrowserless(apiKey: string, url: string): Promise<string[]> {
-  const screenshots: string[] = [];
+// ─── Strategy 1: /unblock API (bypasses anti-bot) ───
 
+async function captureWithUnblock(apiKey: string, url: string): Promise<string[]> {
   try {
-    // Use Browserless /screenshot endpoint with scrolling script
-    // First, get a full page screenshot
-    const fullPageScreenshot = await browserlessScreenshot(apiKey, url, {
-      fullPage: true,
-      waitForTimeout: 5000,
-      gotoOptions: { waitUntil: 'networkidle2', timeout: 30000 },
-    });
-
-    if (fullPageScreenshot) {
-      screenshots.push(fullPageScreenshot);
-    }
-
-    // Also try viewport-based screenshots by scrolling
-    // Use the /function endpoint to run a script that scrolls and captures
-    const scrollScreenshots = await browserlessScrollAndCapture(apiKey, url);
-    screenshots.push(...scrollScreenshots);
-
-  } catch (err) {
-    console.error('Browserless capture error:', err);
-  }
-
-  return screenshots;
-}
-
-async function browserlessScreenshot(
-  apiKey: string,
-  url: string,
-  options: { fullPage?: boolean; waitForTimeout?: number; gotoOptions?: any }
-): Promise<string | null> {
-  try {
-    const response = await fetch(`https://chrome.browserless.io/screenshot?token=${apiKey}`, {
+    console.log('Trying /unblock API...');
+    const response = await fetch(`${BROWSERLESS_BASE}/unblock?token=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url,
-        options: {
-          fullPage: options.fullPage ?? false,
-          type: 'png',
-        },
-        gotoOptions: options.gotoOptions || { waitUntil: 'networkidle2', timeout: 30000 },
-        waitForTimeout: options.waitForTimeout || 3000,
+        browserWSEndpoint: false,
+        screenshot: true,
+        ttl: 30000,
+        waitForTimeout: 5000,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Browserless screenshot error: ${response.status}`, errText);
-      return null;
+      console.error(`Unblock error: ${response.status}`, errText);
+      return [];
     }
 
-    // Response is raw PNG binary
-    const buffer = await response.arrayBuffer();
-    const uint8 = new Uint8Array(buffer);
+    const data = await response.json();
+    console.log(`Unblock response keys: ${Object.keys(data).join(', ')}`);
     
-    // Convert to base64
-    let binary = '';
-    for (let i = 0; i < uint8.length; i++) {
-      binary += String.fromCharCode(uint8[i]);
+    if (data.screenshot) {
+      console.log(`Unblock screenshot: ${Math.round(data.screenshot.length / 1024)}KB`);
+      return [data.screenshot];
     }
-    const base64 = btoa(binary);
     
-    console.log(`Screenshot captured: ${Math.round(base64.length / 1024)}KB`);
-    return base64;
+    return [];
   } catch (err) {
-    console.error('Screenshot error:', err);
-    return null;
+    console.error('Unblock error:', err);
+    return [];
   }
 }
 
-async function browserlessScrollAndCapture(apiKey: string, url: string): Promise<string[]> {
+// ─── Strategy 2: Direct /screenshot ───
+
+async function captureDirectScreenshot(apiKey: string, url: string): Promise<string[]> {
   try {
-    // Use /function endpoint to run a Puppeteer script
-    const response = await fetch(`https://chrome.browserless.io/function?token=${apiKey}`, {
+    console.log('Trying /screenshot API...');
+    const response = await fetch(`${BROWSERLESS_BASE}/screenshot?token=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        code: `
-          module.exports = async ({ page }) => {
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.goto('${url}', { waitUntil: 'networkidle2', timeout: 30000 });
-            await page.waitForTimeout(3000);
-
-            // Try clicking "show all" buttons
-            const showAllSelectors = [
-              'button:has-text("הצג הכל")',
-              'button:has-text("הצג עוד")',
-              'button:has-text("טען עוד")',
-              'a:has-text("הצג הכל")',
-              '[class*="show-all"]',
-              '[class*="load-more"]',
-            ];
-            
-            for (const sel of showAllSelectors) {
-              try {
-                const btns = await page.$$(sel);
-                for (const btn of btns) {
-                  await btn.click().catch(() => {});
-                }
-              } catch(e) {}
-            }
-            
-            await page.waitForTimeout(2000);
-
-            // Scroll down and capture screenshots at intervals
-            const screenshots = [];
-            const totalHeight = await page.evaluate(() => document.body.scrollHeight);
-            const viewportHeight = 1080;
-            const scrollSteps = Math.ceil(totalHeight / viewportHeight);
-            const maxScreenshots = Math.min(scrollSteps, 5); // Cap at 5 screenshots
-
-            for (let i = 0; i < maxScreenshots; i++) {
-              await page.evaluate((y) => window.scrollTo(0, y), i * viewportHeight);
-              await page.waitForTimeout(1000);
-              const screenshot = await page.screenshot({ encoding: 'base64', type: 'png' });
-              screenshots.push(screenshot);
-            }
-
-            return { data: screenshots, type: 'application/json' };
-          };
-        `,
+        url,
+        options: { fullPage: true, type: 'png' },
+        gotoOptions: { waitUntil: 'networkidle2', timeout: 30000 },
+        waitForTimeout: 5000,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Browserless function error: ${response.status}`, errText);
+      console.error(`Screenshot error: ${response.status}`, errText);
+      return [];
+    }
+
+    const buffer = await response.arrayBuffer();
+    const base64 = arrayBufferToBase64(buffer);
+    console.log(`Direct screenshot: ${Math.round(base64.length / 1024)}KB`);
+    return base64.length > 1000 ? [base64] : [];
+  } catch (err) {
+    console.error('Screenshot error:', err);
+    return [];
+  }
+}
+
+// ─── Strategy 3: /function with scrolling ───
+
+async function captureWithFunction(apiKey: string, url: string): Promise<string[]> {
+  try {
+    console.log('Trying /function API with scroll...');
+    const code = `
+module.exports = async ({ page }) => {
+  await page.setViewport({ width: 1920, height: 1080 });
+  await page.goto('${url}', { waitUntil: 'networkidle2', timeout: 30000 });
+  await page.waitForTimeout(5000);
+  
+  // Click show-all buttons
+  try {
+    const buttons = await page.$$('button, a');
+    for (const btn of buttons) {
+      const text = await btn.evaluate(el => el.textContent || '');
+      if (text.includes('הצג הכל') || text.includes('הצג עוד') || text.includes('טען עוד')) {
+        await btn.click().catch(() => {});
+        await page.waitForTimeout(1000);
+      }
+    }
+  } catch(e) {}
+  
+  await page.waitForTimeout(2000);
+  
+  const screenshots = [];
+  const totalHeight = await page.evaluate(() => document.body.scrollHeight);
+  const viewportHeight = 1080;
+  const steps = Math.min(Math.ceil(totalHeight / viewportHeight), 5);
+  
+  for (let i = 0; i < steps; i++) {
+    await page.evaluate((y) => window.scrollTo(0, y), i * viewportHeight);
+    await page.waitForTimeout(1500);
+    const shot = await page.screenshot({ encoding: 'base64', type: 'png' });
+    screenshots.push(shot);
+  }
+  
+  return { data: screenshots, type: 'application/json' };
+};`;
+
+    const response = await fetch(`${BROWSERLESS_BASE}/function?token=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Function error: ${response.status}`, errText);
       return [];
     }
 
     const result = await response.json();
     const data = result.data || result;
-    
     if (Array.isArray(data)) {
-      console.log(`Scroll capture: got ${data.length} screenshots`);
-      return data.filter((s: any) => typeof s === 'string' && s.length > 100);
+      const valid = data.filter((s: any) => typeof s === 'string' && s.length > 1000);
+      console.log(`Function scroll: got ${valid.length} screenshots`);
+      return valid;
     }
-
     return [];
   } catch (err) {
-    console.error('Scroll capture error:', err);
+    console.error('Function error:', err);
     return [];
   }
 }
 
-// ─── AI Vision Parsing ───
+// ─── Helpers ───
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const uint8 = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    const chunk = uint8.subarray(i, Math.min(i + chunkSize, uint8.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+// ─── AI Vision ───
 
 async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
   const prompt = `אתה מנתח צילום מסך של דף הטבות מאתר מועדון "${membership.name}".
