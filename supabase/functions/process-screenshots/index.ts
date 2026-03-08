@@ -22,7 +22,8 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { images, membership_slug, category_hint } = await req.json();
+    const body = await req.json();
+    const { images, membership_slug, category_hint, skip_deactivate } = body;
     
     if (!images || !Array.isArray(images) || images.length === 0) {
       return new Response(JSON.stringify({ error: 'No images provided' }), {
