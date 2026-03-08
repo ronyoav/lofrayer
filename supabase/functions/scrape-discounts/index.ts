@@ -316,7 +316,7 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
 רשימת הלינקים שנמצאו בדף:
 ${linksText}
 
-החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות צרכניות, החזר [].`;
+החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות צרכניות, החזר [].
 
 התוכן:
 ${truncatedContent}`;
