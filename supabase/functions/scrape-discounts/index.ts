@@ -59,9 +59,16 @@ Deno.serve(async (req) => {
         let content = await scrapeWithFirecrawl(firecrawlKey, membership.scrape_url);
         let strategy = 'scrape';
 
-        // Strategy 2: If scrape returned too little, try with screenshot + AI vision
+        // Strategy 1.5: If too little content, try with actions (click "show all", scroll, screenshot)
         if (!content.markdown || content.markdown.length < 50) {
-          console.log(`Strategy 1 failed for ${membership.name}, trying screenshot...`);
+          console.log(`Strategy 1 failed for ${membership.name}, trying with actions...`);
+          content = await scrapeWithActions(firecrawlKey, membership.scrape_url);
+          strategy = 'actions';
+        }
+
+        // Strategy 2: If still too little, try screenshot + AI vision
+        if ((!content.markdown || content.markdown.length < 50) && !content.screenshot) {
+          console.log(`Strategy 1.5 failed for ${membership.name}, trying screenshot...`);
           content = await scrapeWithScreenshot(firecrawlKey, membership.scrape_url);
           strategy = 'screenshot';
         }
@@ -184,6 +191,56 @@ async function scrapeWithFirecrawl(apiKey: string, url: string): Promise<ScrapeC
   }
 }
 
+// ─── Strategy 1.5: Scrape with actions (click buttons, scroll, screenshot) ───
+
+async function scrapeWithActions(apiKey: string, url: string): Promise<ScrapeContent> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        formats: ['markdown', 'screenshot', 'links'],
+        waitFor: 3000,
+        actions: [
+          // Wait for page to fully load
+          { type: 'wait', milliseconds: 2000 },
+          // Try clicking common "show all" / "load more" buttons in Hebrew
+          { type: 'click', selector: 'button:has-text("הצג הכל")', all: true },
+          { type: 'click', selector: 'button:has-text("טען עוד")', all: true },
+          { type: 'click', selector: 'button:has-text("הצג עוד")', all: true },
+          { type: 'click', selector: 'a:has-text("הצג הכל")', all: true },
+          { type: 'click', selector: '[class*="show-all"]', all: true },
+          { type: 'click', selector: '[class*="load-more"]', all: true },
+          { type: 'wait', milliseconds: 2000 },
+          // Scroll down to load lazy content
+          { type: 'scroll', direction: 'down' },
+          { type: 'wait', milliseconds: 1000 },
+          { type: 'scroll', direction: 'down' },
+          { type: 'wait', milliseconds: 1000 },
+          // Take a full-page screenshot
+          { type: 'screenshot', fullPage: true },
+        ],
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('Actions scrape error:', data.error);
+      return {};
+    }
+
+    const screenshot = data.data?.actions?.screenshots?.[0] || data.data?.screenshot || null;
+    return {
+      markdown: data.data?.markdown || data.markdown || '',
+      links: data.data?.links || data.links || [],
+      screenshot,
+    };
+  } catch (err) {
+    console.error('Actions scrape error:', err);
+    return {};
+  }
+}
+
 // ─── Strategy 2: Screenshot + AI vision for JS-heavy sites ───
 
 async function scrapeWithScreenshot(apiKey: string, url: string): Promise<ScrapeContent> {
@@ -217,7 +274,7 @@ async function searchForBenefits(apiKey: string, membershipName: string): Promis
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: `${membershipName} הטבות הנחות 2026`,
+        query: `${membershipName} הנחות צרכניות קופונים מבצעים חנויות מסעדות אופנה`,
         limit: 5,
         scrapeOptions: { formats: ['markdown'] },
       }),
@@ -244,7 +301,8 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
   const linksText = links.slice(0, 100).join('\n');
 
   const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
-חלץ את כל ההנחות וההטבות מהתוכן הבא והחזר אותן כ-JSON array.
+חלץ רק הנחות צרכניות אמיתיות (מותגים, חנויות, מסעדות, בתי קולנוע, חופשות וכו').
+אל תכלול מענקים ממשלתיים, תגמולים, סיוע כלכלי או זכאויות.
 
 כל הנחה צריכה לכלול:
 - brand: שם המותג/בית העסק (בעברית)
@@ -258,7 +316,7 @@ async function parseWithAI(apiKey: string, markdown: string, membership: any, li
 רשימת הלינקים שנמצאו בדף:
 ${linksText}
 
-החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].
+החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות צרכניות, החזר [].
 
 התוכן:
 ${truncatedContent}`;
@@ -270,7 +328,7 @@ ${truncatedContent}`;
 
 async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
   const prompt = `אתה מנתח צילום מסך של דף הטבות מאתר מועדון "${membership.name}".
-חלץ את כל ההנחות וההטבות שאתה רואה בתמונה והחזר אותן כ-JSON array.
+חלץ רק הנחות צרכניות (מותגים, חנויות, מסעדות, קולנוע, חופשות). אל תכלול מענקים ממשלתיים או תגמולים.
 
 כל הנחה צריכה לכלול:
 - brand: שם המותג/בית העסק (בעברית)
