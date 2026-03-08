@@ -1,12 +1,7 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  MOCK_DISCOUNTS,
-  CATEGORIES,
-  LOCATIONS,
-  MEMBERSHIPS,
-} from "@/data/mockData";
+import { CATEGORIES, LOCATIONS } from "@/data/mockData";
 import {
   getSelectedMemberships,
   setOnboardingComplete,
@@ -14,26 +9,24 @@ import {
 } from "@/lib/storage";
 import DiscountCard from "@/components/DiscountCard";
 import { useNavigate } from "react-router-dom";
+import { useDiscounts } from "@/hooks/useDiscounts";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const DashboardPage = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const userMemberships = getSelectedMemberships();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("הכל");
   const [selectedLocation, setSelectedLocation] = useState("כל הארץ");
   const [showFilters, setShowFilters] = useState(false);
+  const [isScraping, setIsScraping] = useState(false);
 
-  const userMembershipNames = useMemo(
-    () =>
-      MEMBERSHIPS.filter((m) => userMemberships.includes(m.id)).map(
-        (m) => m.name
-      ),
-    [userMemberships]
-  );
+  const { data: discounts = [], isLoading, refetch } = useDiscounts(userMemberships);
 
   const filteredDiscounts = useMemo(() => {
-    return MOCK_DISCOUNTS.filter((d) => {
-      if (!userMemberships.includes(d.membershipId)) return false;
+    return discounts.filter((d) => {
       if (search && !d.brand.includes(search) && !d.title.includes(search))
         return false;
       if (selectedCategory !== "הכל" && d.category !== selectedCategory)
@@ -46,12 +39,26 @@ const DashboardPage = () => {
         return false;
       return true;
     });
-  }, [search, selectedCategory, selectedLocation, userMemberships]);
+  }, [search, selectedCategory, selectedLocation, discounts]);
 
   const handleReset = () => {
     setOnboardingComplete(false);
     setSelectedMemberships([]);
     navigate("/");
+  };
+
+  const handleScrape = async () => {
+    setIsScraping(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('scrape-discounts');
+      if (error) throw error;
+      toast({ title: "עדכון הנחות", description: "ההנחות עודכנו בהצלחה!" });
+      refetch();
+    } catch (err) {
+      toast({ title: "שגיאה", description: "נכשל בעדכון הנחות", variant: "destructive" });
+    } finally {
+      setIsScraping(false);
+    }
   };
 
   return (
@@ -66,13 +73,23 @@ const DashboardPage = () => {
                 {filteredDiscounts.length} הנחות זמינות
               </p>
             </div>
-            <button
-              onClick={handleReset}
-              className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
-              title="איפוס הגדרות"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleScrape}
+                disabled={isScraping}
+                className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
+                title="עדכן הנחות"
+              >
+                <RefreshCw className={`h-5 w-5 ${isScraping ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={handleReset}
+                className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
+                title="איפוס הגדרות"
+              >
+                <LogOut className="h-5 w-5" />
+              </button>
+            </div>
           </div>
 
           {/* Search */}
@@ -89,22 +106,10 @@ const DashboardPage = () => {
       </div>
 
       <div className="mx-auto max-w-md px-4">
-        {/* Active memberships */}
-        <div className="flex items-center gap-2 overflow-x-auto py-4 -mx-1 px-1 scrollbar-hide">
-          {userMembershipNames.map((name) => (
-            <span
-              key={name}
-              className="flex-shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground"
-            >
-              {name}
-            </span>
-          ))}
-        </div>
-
         {/* Filters toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="mt-4 mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <SlidersHorizontal className="h-4 w-4" />
           סינון
@@ -112,11 +117,8 @@ const DashboardPage = () => {
 
         {showFilters && (
           <div className="mb-4 space-y-3 rounded-xl bg-card p-4 shadow-card animate-in slide-in-from-top-2">
-            {/* Categories */}
             <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                קטגוריה
-              </p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">קטגוריה</p>
               <div className="flex flex-wrap gap-2">
                 {CATEGORIES.map((cat) => (
                   <button
@@ -133,8 +135,6 @@ const DashboardPage = () => {
                 ))}
               </div>
             </div>
-
-            {/* Locations */}
             <div>
               <p className="mb-2 text-xs font-medium text-muted-foreground">
                 <MapPin className="inline h-3 w-3 ml-1" />
@@ -161,19 +161,35 @@ const DashboardPage = () => {
 
         {/* Discounts list */}
         <div className="space-y-3 pb-8">
-          {filteredDiscounts.length === 0 ? (
+          {isLoading ? (
+            <div className="py-16 text-center">
+              <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" />
+              <p className="text-muted-foreground">טוען הנחות...</p>
+            </div>
+          ) : filteredDiscounts.length === 0 ? (
             <div className="py-16 text-center">
               <p className="text-4xl mb-3">🔍</p>
-              <p className="text-lg font-medium text-muted-foreground">
-                לא נמצאו הנחות
-              </p>
-              <p className="text-sm text-muted-foreground">
-                נסה לשנות את החיפוש או הסינון
-              </p>
+              <p className="text-lg font-medium text-muted-foreground">לא נמצאו הנחות</p>
+              <p className="text-sm text-muted-foreground">נסה לשנות את החיפוש או הסינון</p>
             </div>
           ) : (
             filteredDiscounts.map((discount) => (
-              <DiscountCard key={discount.id} discount={discount} />
+              <DiscountCard
+                key={discount.id}
+                discount={{
+                  id: discount.id,
+                  brand: discount.brand,
+                  brandLogo: discount.brandLogo || "",
+                  title: discount.title,
+                  description: discount.description || "",
+                  discountValue: discount.discount_value,
+                  membershipId: discount.membership?.slug || "",
+                  membershipName: discount.membershipName,
+                  category: discount.category || "",
+                  location: discount.location || undefined,
+                  redeemUrl: discount.redeem_url || "#",
+                }}
+              />
             ))
           )}
         </div>
