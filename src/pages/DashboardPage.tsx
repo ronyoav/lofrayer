@@ -82,16 +82,15 @@ const DashboardPage = () => {
         body: { slug },
       });
       if (error) throw error;
-      const result = data?.results?.[0];
-      if (result?.status === 'success') {
+      if (data?.success) {
         toast({
           title: `הנחות ${name}`,
-          description: `נמצאו ${result.discountsFound} הנחות חדשות`,
+          description: `נמצאו ${data.discountsFound} הנחות חדשות (Bright Data)`,
         });
       } else {
         toast({
           title: `${name}`,
-          description: result?.error || 'לא נמצאו הנחות',
+          description: data?.error || 'לא נמצאו הנחות',
           variant: "destructive",
         });
       }
