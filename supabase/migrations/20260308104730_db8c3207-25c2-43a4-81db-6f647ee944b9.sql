@@ -1,0 +1,1 @@
+UPDATE discounts SET is_active = false WHERE membership_id = '48ca6e6c-8a74-49ac-b221-dddc8854df98' AND scraped_at IS NOT NULL;
