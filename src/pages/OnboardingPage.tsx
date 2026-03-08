@@ -159,9 +159,20 @@ const OnboardingPage = () => {
         <h1 className="mb-2 text-3xl font-bold text-foreground">
           באילו מנויים את/ה חבר/ה?
         </h1>
-        <p className="mb-8 text-muted-foreground text-lg">
+        <p className="mb-4 text-muted-foreground text-lg">
           בחר/י את כל המנויים שלך כדי שנמצא לך את כל ההנחות
         </p>
+
+        {/* Search */}
+        <div className="relative mb-6">
+          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="חפש מנוי..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-10 rounded-xl border-none bg-card pr-10 text-foreground placeholder:text-muted-foreground shadow-card"
+          />
+        </div>
 
         {isLoading ? (
           <div className="py-8 text-center">
@@ -169,26 +180,68 @@ const OnboardingPage = () => {
             <p className="text-muted-foreground">טוען מנויים...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 mb-8">
-            {memberships.map((m) => {
-              const isSelected = selected.includes(m.slug);
+          <div className="space-y-6 mb-8 max-h-[55vh] overflow-y-auto">
+            {Object.entries(MEMBERSHIP_CATEGORIES).map(([category, slugs]) => {
+              const categoryMemberships = filteredMemberships.filter((m) => slugs.includes(m.slug));
+              if (categoryMemberships.length === 0) return null;
               return (
-                <button
-                  key={m.slug}
-                  onClick={() => toggleMembership(m.slug)}
-                  className={`flex items-center gap-3 rounded-xl p-4 text-right transition-all duration-200 ${
-                    isSelected
-                      ? "bg-accent border-2 border-primary shadow-card"
-                      : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-                  }`}
-                >
-                  <span className="text-2xl">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
-                  <span className="text-sm font-medium text-foreground leading-tight">
-                    {m.name}
-                  </span>
-                </button>
+                <div key={category}>
+                  <p className="text-sm font-semibold text-muted-foreground mb-2">{category}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {categoryMemberships.map((m) => {
+                      const isSelected = selected.includes(m.slug);
+                      return (
+                        <button
+                          key={m.slug}
+                          onClick={() => toggleMembership(m.slug)}
+                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+                            isSelected
+                              ? "bg-accent border-2 border-primary shadow-card"
+                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+                          }`}
+                        >
+                          <span className="text-lg">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
+                          <span className="text-xs font-medium text-foreground leading-tight">
+                            {m.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
+            {/* Show uncategorized memberships */}
+            {filteredMemberships
+              .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
+              .length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-muted-foreground mb-2">🏷️ אחר</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {filteredMemberships
+                    .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
+                    .map((m) => {
+                      const isSelected = selected.includes(m.slug);
+                      return (
+                        <button
+                          key={m.slug}
+                          onClick={() => toggleMembership(m.slug)}
+                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+                            isSelected
+                              ? "bg-accent border-2 border-primary shadow-card"
+                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+                          }`}
+                        >
+                          <span className="text-lg">🏷️</span>
+                          <span className="text-xs font-medium text-foreground leading-tight">
+                            {m.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
