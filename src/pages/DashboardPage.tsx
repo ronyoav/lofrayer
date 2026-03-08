@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CATEGORIES, LOCATIONS } from "@/data/mockData";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@/lib/storage";
 import DiscountCard from "@/components/DiscountCard";
 import { useNavigate } from "react-router-dom";
-import { useDiscounts } from "@/hooks/useDiscounts";
+import { useDiscounts, useMemberships } from "@/hooks/useDiscounts";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,9 +21,16 @@ const DashboardPage = () => {
   const [selectedCategory, setSelectedCategory] = useState("הכל");
   const [selectedLocation, setSelectedLocation] = useState("כל הארץ");
   const [showFilters, setShowFilters] = useState(false);
+  const [scrapingSlug, setScrapingSlug] = useState<string | null>(null);
   const [isScraping, setIsScraping] = useState(false);
 
   const { data: discounts = [], isLoading, refetch } = useDiscounts(userMemberships);
+  const { data: allMemberships = [] } = useMemberships();
+
+  // Get only memberships the user selected
+  const myMemberships = useMemo(() => {
+    return allMemberships.filter((m) => userMemberships.includes(m.slug));
+  }, [allMemberships, userMemberships]);
 
   const filteredDiscounts = useMemo(() => {
     return discounts.filter((d) => {
@@ -47,17 +54,51 @@ const DashboardPage = () => {
     navigate("/");
   };
 
-  const handleScrape = async () => {
+  const handleScrapeAll = async () => {
     setIsScraping(true);
     try {
       const { data, error } = await supabase.functions.invoke('scrape-discounts');
       if (error) throw error;
-      toast({ title: "עדכון הנחות", description: "ההנחות עודכנו בהצלחה!" });
+      const results = data?.results || [];
+      const successCount = results.filter((r: any) => r.status === 'success').length;
+      const totalDiscounts = results.reduce((acc: number, r: any) => acc + (r.discountsFound || 0), 0);
+      toast({
+        title: "סריקה הושלמה",
+        description: `נסרקו ${successCount} אתרים, נמצאו ${totalDiscounts} הנחות חדשות`,
+      });
       refetch();
     } catch (err) {
-      toast({ title: "שגיאה", description: "נכשל בעדכון הנחות", variant: "destructive" });
+      toast({ title: "שגיאה", description: "נכשל בסריקת הנחות", variant: "destructive" });
     } finally {
       setIsScraping(false);
+    }
+  };
+
+  const handleScrapeOne = async (slug: string, name: string) => {
+    setScrapingSlug(slug);
+    try {
+      const { data, error } = await supabase.functions.invoke('scrape-discounts', {
+        body: { slug },
+      });
+      if (error) throw error;
+      const result = data?.results?.[0];
+      if (result?.status === 'success') {
+        toast({
+          title: `הנחות ${name}`,
+          description: `נמצאו ${result.discountsFound} הנחות חדשות`,
+        });
+      } else {
+        toast({
+          title: `${name}`,
+          description: result?.error || 'לא נמצאו הנחות',
+          variant: "destructive",
+        });
+      }
+      refetch();
+    } catch (err) {
+      toast({ title: "שגיאה", description: `נכשל בסריקת ${name}`, variant: "destructive" });
+    } finally {
+      setScrapingSlug(null);
     }
   };
 
@@ -75,10 +116,10 @@ const DashboardPage = () => {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={handleScrape}
+                onClick={handleScrapeAll}
                 disabled={isScraping}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
-                title="עדכן הנחות"
+                title="סרוק הנחות מכל האתרים"
               >
                 <RefreshCw className={`h-5 w-5 ${isScraping ? 'animate-spin' : ''}`} />
               </button>
@@ -106,10 +147,43 @@ const DashboardPage = () => {
       </div>
 
       <div className="mx-auto max-w-md px-4">
+        {/* My Memberships - scrape buttons */}
+        {myMemberships.length > 0 && (
+          <div className="mt-4 mb-3">
+            <p className="text-xs font-medium text-muted-foreground mb-2">סרוק הנחות לפי מנוי:</p>
+            <div className="flex flex-wrap gap-2">
+              {myMemberships.map((m) => {
+                const isThisScraping = scrapingSlug === m.slug;
+                const hasScrapeUrl = !!m.scrape_url;
+                return (
+                  <button
+                    key={m.slug}
+                    onClick={() => handleScrapeOne(m.slug, m.name)}
+                    disabled={isThisScraping || !hasScrapeUrl || isScraping}
+                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all
+                      ${hasScrapeUrl
+                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                        : "bg-muted text-muted-foreground cursor-not-allowed"
+                      } disabled:opacity-50`}
+                    title={hasScrapeUrl ? `סרוק הנחות מ-${m.name}` : "אין כתובת סריקה"}
+                  >
+                    {isThisScraping ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Filters toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className="mt-4 mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="mt-2 mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <SlidersHorizontal className="h-4 w-4" />
           סינון
@@ -170,7 +244,14 @@ const DashboardPage = () => {
             <div className="py-16 text-center">
               <p className="text-4xl mb-3">🔍</p>
               <p className="text-lg font-medium text-muted-foreground">לא נמצאו הנחות</p>
-              <p className="text-sm text-muted-foreground">נסה לשנות את החיפוש או הסינון</p>
+              <p className="text-sm text-muted-foreground mb-4">נסה לשנות את החיפוש או הסינון</p>
+              <button
+                onClick={handleScrapeAll}
+                disabled={isScraping}
+                className="text-sm text-primary underline hover:no-underline disabled:opacity-50"
+              >
+                {isScraping ? "סורק..." : "סרוק הנחות חדשות מהאתרים"}
+              </button>
             </div>
           ) : (
             filteredDiscounts.map((discount) => (
