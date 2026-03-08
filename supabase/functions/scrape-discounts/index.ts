@@ -11,10 +11,18 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const apiKey = Deno.env.get('FIRECRAWL_API_KEY');
-    if (!apiKey) {
+    const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
+    if (!firecrawlKey) {
       return new Response(
         JSON.stringify({ success: false, error: 'FIRECRAWL_API_KEY not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    if (!lovableApiKey) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'LOVABLE_API_KEY not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -23,11 +31,21 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get all memberships with scrape URLs
-    const { data: memberships, error: membershipError } = await supabase
+    // Optionally filter by specific membership slug
+    const body = await req.json().catch(() => ({}));
+    const targetSlug = body?.slug;
+
+    // Get memberships with scrape URLs
+    let query = supabase
       .from('memberships')
       .select('*')
       .not('scrape_url', 'is', null);
+
+    if (targetSlug) {
+      query = query.eq('slug', targetSlug);
+    }
+
+    const { data: memberships, error: membershipError } = await query;
 
     if (membershipError) {
       throw new Error(`Failed to fetch memberships: ${membershipError.message}`);
@@ -39,11 +57,11 @@ Deno.serve(async (req) => {
       try {
         console.log(`Scraping benefits for ${membership.name} from ${membership.scrape_url}`);
 
-        // Scrape the membership benefits page
+        // Step 1: Scrape with Firecrawl
         const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${firecrawlKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -59,7 +77,8 @@ Deno.serve(async (req) => {
           console.error(`Failed to scrape ${membership.name}:`, scrapeData);
           results.push({
             membership: membership.name,
-            status: 'error',
+            slug: membership.slug,
+            status: 'scrape_error',
             error: scrapeData.error || `HTTP ${scrapeResponse.status}`,
           });
           continue;
@@ -67,39 +86,73 @@ Deno.serve(async (req) => {
 
         const markdown = scrapeData.data?.markdown || scrapeData.markdown || '';
 
-        // Try to extract discount-like patterns from the scraped content
-        // This is a basic extraction - can be improved with AI/LLM parsing
-        const discountPatterns = extractDiscounts(markdown, membership);
+        if (!markdown || markdown.length < 50) {
+          results.push({
+            membership: membership.name,
+            slug: membership.slug,
+            status: 'no_content',
+            contentLength: markdown.length,
+          });
+          continue;
+        }
 
-        if (discountPatterns.length > 0) {
-          // Upsert scraped discounts
+        console.log(`Got ${markdown.length} chars for ${membership.name}, sending to AI...`);
+
+        // Step 2: Parse with AI
+        const discounts = await parseWithAI(lovableApiKey, markdown, membership);
+
+        if (discounts.length > 0) {
+          // Step 3: Upsert into database
+          // First deactivate old scraped discounts for this membership
+          await supabase
+            .from('discounts')
+            .update({ is_active: false })
+            .eq('membership_id', membership.id)
+            .not('scraped_at', 'is', null);
+
+          // Insert new ones
           const { error: insertError } = await supabase
             .from('discounts')
-            .upsert(
-              discountPatterns.map(d => ({
-                ...d,
+            .insert(
+              discounts.map((d: any) => ({
+                brand: d.brand,
+                title: d.title,
+                description: d.description || null,
+                discount_value: d.discount_value,
+                category: d.category || 'כללי',
+                location: d.location || 'כל הארץ',
+                redeem_url: d.redeem_url || membership.website_url || null,
                 membership_id: membership.id,
                 scraped_at: new Date().toISOString(),
                 is_active: true,
-              })),
-              { onConflict: 'id' }
+              }))
             );
 
           if (insertError) {
             console.error(`Failed to insert discounts for ${membership.name}:`, insertError);
+            results.push({
+              membership: membership.name,
+              slug: membership.slug,
+              status: 'insert_error',
+              error: insertError.message,
+              discountsFound: discounts.length,
+            });
+            continue;
           }
         }
 
         results.push({
           membership: membership.name,
+          slug: membership.slug,
           status: 'success',
-          discountsFound: discountPatterns.length,
+          discountsFound: discounts.length,
           contentLength: markdown.length,
         });
       } catch (err) {
-        console.error(`Error scraping ${membership.name}:`, err);
+        console.error(`Error processing ${membership.name}:`, err);
         results.push({
           membership: membership.name,
+          slug: membership.slug,
           status: 'error',
           error: err instanceof Error ? err.message : 'Unknown error',
         });
@@ -119,61 +172,64 @@ Deno.serve(async (req) => {
   }
 });
 
-// Basic discount extraction from markdown
-function extractDiscounts(markdown: string, membership: any) {
-  const discounts: any[] = [];
-  
-  // Look for percentage patterns like "20% הנחה" or price patterns
-  const lines = markdown.split('\n').filter(l => l.trim());
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const percentMatch = line.match(/(\d+)%\s*(הנחה|discount)/i);
-    const priceMatch = line.match(/(\d+)[₪\$]\s*(במקום|instead)/i);
-    
-    if (percentMatch || priceMatch) {
-      const value = percentMatch ? `${percentMatch[1]}%` : `${priceMatch![1]}₪`;
-      
-      // Try to extract brand name from surrounding context
-      const contextLines = lines.slice(Math.max(0, i - 2), i + 3).join(' ');
-      
-      discounts.push({
-        brand: extractBrandName(contextLines) || 'לא ידוע',
-        title: line.trim().substring(0, 200),
-        description: contextLines.substring(0, 500),
-        discount_value: value,
-        category: guessCategory(contextLines),
-        location: 'כל הארץ',
-        redeem_url: membership.website_url,
-      });
+async function parseWithAI(apiKey: string, markdown: string, membership: any): Promise<any[]> {
+  // Truncate to avoid token limits
+  const truncatedContent = markdown.substring(0, 8000);
+
+  const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
+חלץ את כל ההנחות וההטבות מהתוכן הבא והחזר אותן כ-JSON array.
+
+כל הנחה צריכה לכלול:
+- brand: שם המותג/בית העסק (בעברית)
+- title: כותרת ההנחה (קצרה וברורה)
+- description: תיאור קצר של ההטבה
+- discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה", "חינם")
+- category: קטגוריה (אחת מ: אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
+- location: מיקום אם מצוין (או "כל הארץ")
+
+החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].
+דוגמה: [{"brand": "נייקי", "title": "20% הנחה על כל הקולקציה", "description": "הנחה בכל הסניפים", "discount_value": "20%", "category": "אופנה", "location": "כל הארץ"}]
+
+התוכן:
+${truncatedContent}`;
+
+  try {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`AI API error: ${response.status}`, errText);
+      return [];
     }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+
+    // Extract JSON from response (might be wrapped in ```json blocks)
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.log('No JSON array found in AI response');
+      return [];
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log(`AI extracted ${parsed.length} discounts for ${membership.name}`);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('AI parsing error:', err);
+    return [];
   }
-
-  return discounts;
-}
-
-function extractBrandName(text: string): string | null {
-  // Common Israeli brand patterns - this would be improved with AI
-  const brands = ['נייקי', 'אדידס', 'קסטרו', 'FOX', 'גולף', 'רנואר', 'מקדונלד', 'סופר-פארם', 'שופרסל', 'אייס', 'פיצה האט', 'סינמה סיטי', 'הולמס פלייס', 'זארה', 'H&M', 'ZARA', 'Nike', 'Adidas'];
-  
-  for (const brand of brands) {
-    if (text.includes(brand)) return brand;
-  }
-  return null;
-}
-
-function guessCategory(text: string): string {
-  const categories: Record<string, string[]> = {
-    'אופנה': ['אופנה', 'ביגוד', 'הלבשה', 'נעליים', 'חולצה', 'מכנס'],
-    'מזון': ['מזון', 'מסעדה', 'אוכל', 'פיצה', 'המבורגר', 'סופרמרקט'],
-    'בריאות': ['בריאות', 'תרופות', 'טיפוח', 'קוסמטיקה', 'בית מרקחת'],
-    'בידור': ['קולנוע', 'סרט', 'הצגה', 'בידור', 'כרטיס'],
-    'חשמל': ['חשמל', 'מוצרי חשמל', 'אלקטרוניקה', 'מחשב'],
-    'ספורט': ['ספורט', 'כושר', 'חדר כושר', 'שחייה'],
-  };
-
-  for (const [category, keywords] of Object.entries(categories)) {
-    if (keywords.some(k => text.includes(k))) return category;
-  }
-  return 'כללי';
 }
