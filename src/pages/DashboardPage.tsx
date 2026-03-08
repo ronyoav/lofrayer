@@ -77,20 +77,20 @@ const DashboardPage = () => {
   const handleScrapeOne = async (slug: string, name: string) => {
     setScrapingSlug(slug);
     try {
-      const { data, error } = await supabase.functions.invoke('scrape-discounts', {
+      // Try Bright Data first (Israeli proxy), fallback to Firecrawl
+      const { data, error } = await supabase.functions.invoke('scrape-brightdata', {
         body: { slug },
       });
       if (error) throw error;
-      const result = data?.results?.[0];
-      if (result?.status === 'success') {
+      if (data?.success) {
         toast({
           title: `הנחות ${name}`,
-          description: `נמצאו ${result.discountsFound} הנחות חדשות`,
+          description: `נמצאו ${data.discountsFound} הנחות חדשות (Bright Data)`,
         });
       } else {
         toast({
           title: `${name}`,
-          description: result?.error || 'לא נמצאו הנחות',
+          description: data?.error || 'לא נמצאו הנחות',
           variant: "destructive",
         });
       }
