@@ -59,9 +59,16 @@ Deno.serve(async (req) => {
         let content = await scrapeWithFirecrawl(firecrawlKey, membership.scrape_url);
         let strategy = 'scrape';
 
-        // Strategy 2: If scrape returned too little, try with screenshot + AI vision
+        // Strategy 1.5: If too little content, try with actions (click "show all", scroll, screenshot)
         if (!content.markdown || content.markdown.length < 50) {
-          console.log(`Strategy 1 failed for ${membership.name}, trying screenshot...`);
+          console.log(`Strategy 1 failed for ${membership.name}, trying with actions...`);
+          content = await scrapeWithActions(firecrawlKey, membership.scrape_url);
+          strategy = 'actions';
+        }
+
+        // Strategy 2: If still too little, try screenshot + AI vision
+        if ((!content.markdown || content.markdown.length < 50) && !content.screenshot) {
+          console.log(`Strategy 1.5 failed for ${membership.name}, trying screenshot...`);
           content = await scrapeWithScreenshot(firecrawlKey, membership.scrape_url);
           strategy = 'screenshot';
         }
