@@ -68,7 +68,7 @@ const DashboardPage = () => {
         <div className="mx-auto max-w-md">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold">LoFrayer</h1>
+              <h1 className="text-2xl font-bold">🔍 חיפוש הטבות</h1>
               <p className="text-sm opacity-90">
                 {filteredDiscounts.length} הנחות זמינות
               </p>

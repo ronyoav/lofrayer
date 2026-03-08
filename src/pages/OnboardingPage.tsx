@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { MapPin, ChevronLeft } from "lucide-react";
+import { useState, useMemo } from "react";
+import { MapPin, ChevronLeft, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   setSelectedMemberships,
   setOnboardingComplete,
@@ -9,24 +10,87 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useMemberships } from "@/hooks/useDiscounts";
 
+const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
+  "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
+  "💳 כרטיסי אשראי": ["cal", "max", "iscard", "visa-cal", "isracard-benefits"],
+  "🏥 קופות חולים": ["clalit", "maccabi", "leumit", "meuhedet"],
+  "🎖️ צבא וביטחון": ["behatzada", "hever", "idf-disabled", "police"],
+  "✊ הסתדרויות": ["histadrut", "histadrut-morim", "histadrut-medina", "histadrut-refuit"],
+  "📱 תקשורת ואנרגיה": ["hot-club", "partner", "cellcom", "pelephone", "yellow-paz", "sonol"],
+  "🛡️ ביטוח": ["migdal", "harel", "menora", "clal-insurance"],
+  "🛒 מועדוני צרכנות": ["face", "clubhub", "pais-plus", "hofesh", "rami-levy-club", "shufersal-club"],
+  "⚖️ לשכות מקצועיות": ["lishkat-orchei-din", "lishkat-roei-heshbon"],
+};
+
 const MEMBERSHIP_EMOJIS: Record<string, string> = {
+  // צבא וביטחון
   "behatzada": "🎖️",
-  "cal": "💳",
-  "bank-hapoalim": "🏦",
-  "histadrut-morim": "📚",
   "hever": "🤝",
+  "idf-disabled": "🎗️",
+  "police": "👮",
+  // בנקים
+  "bank-hapoalim": "🏦",
+  "bank-leumi": "🏦",
+  "bank-discount": "🏦",
+  "bank-mizrahi": "🏦",
+  "bank-yahav": "🏦",
+  "bank-benleumi": "🏦",
+  "poalim-wonder": "✨",
+  "mafteah-discount": "🔑",
+  // כרטיסי אשראי
+  "cal": "💳",
   "max": "💳",
   "iscard": "💳",
+  "visa-cal": "💳",
+  "isracard-benefits": "💳",
+  // קופות חולים
   "clalit": "🏥",
   "maccabi": "🏥",
+  "leumit": "🏥",
+  "meuhedet": "🏥",
+  // הסתדרויות
+  "histadrut": "✊",
+  "histadrut-morim": "📚",
+  "histadrut-medina": "🏛️",
+  "histadrut-refuit": "⚕️",
+  // תקשורת ואנרגיה
+  "hot-club": "📺",
+  "partner": "📱",
+  "cellcom": "📱",
+  "pelephone": "📱",
+  "yellow-paz": "⛽",
+  "sonol": "⛽",
+  // ביטוח
+  "migdal": "🛡️",
+  "harel": "🛡️",
+  "menora": "🛡️",
+  "clal-insurance": "🛡️",
+  // מועדוני צרכנות
+  "face": "😊",
+  "clubhub": "🎯",
+  "pais-plus": "🎰",
   "hofesh": "🌴",
+  // לשכות
+  "lishkat-orchei-din": "⚖️",
+  "lishkat-roei-heshbon": "📊",
+  // רשתות
+  "rami-levy-club": "🛒",
+  "shufersal-club": "🛒",
 };
 
 const OnboardingPage = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<"location" | "memberships">("location");
   const [selected, setSelected] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const { data: memberships = [], isLoading } = useMemberships();
+
+  const filteredMemberships = useMemo(() => {
+    if (!searchQuery) return memberships;
+    return memberships.filter((m) =>
+      m.name.includes(searchQuery) || m.slug.includes(searchQuery.toLowerCase())
+    );
+  }, [memberships, searchQuery]);
 
   const handleLocationPermission = (allow: boolean) => {
     setLocationEnabled(allow);
@@ -95,9 +159,20 @@ const OnboardingPage = () => {
         <h1 className="mb-2 text-3xl font-bold text-foreground">
           באילו מנויים את/ה חבר/ה?
         </h1>
-        <p className="mb-8 text-muted-foreground text-lg">
+        <p className="mb-4 text-muted-foreground text-lg">
           בחר/י את כל המנויים שלך כדי שנמצא לך את כל ההנחות
         </p>
+
+        {/* Search */}
+        <div className="relative mb-6">
+          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="חפש מנוי..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-10 rounded-xl border-none bg-card pr-10 text-foreground placeholder:text-muted-foreground shadow-card"
+          />
+        </div>
 
         {isLoading ? (
           <div className="py-8 text-center">
@@ -105,26 +180,68 @@ const OnboardingPage = () => {
             <p className="text-muted-foreground">טוען מנויים...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 mb-8">
-            {memberships.map((m) => {
-              const isSelected = selected.includes(m.slug);
+          <div className="space-y-6 mb-8 max-h-[55vh] overflow-y-auto">
+            {Object.entries(MEMBERSHIP_CATEGORIES).map(([category, slugs]) => {
+              const categoryMemberships = filteredMemberships.filter((m) => slugs.includes(m.slug));
+              if (categoryMemberships.length === 0) return null;
               return (
-                <button
-                  key={m.slug}
-                  onClick={() => toggleMembership(m.slug)}
-                  className={`flex items-center gap-3 rounded-xl p-4 text-right transition-all duration-200 ${
-                    isSelected
-                      ? "bg-accent border-2 border-primary shadow-card"
-                      : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-                  }`}
-                >
-                  <span className="text-2xl">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
-                  <span className="text-sm font-medium text-foreground leading-tight">
-                    {m.name}
-                  </span>
-                </button>
+                <div key={category}>
+                  <p className="text-sm font-semibold text-muted-foreground mb-2">{category}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {categoryMemberships.map((m) => {
+                      const isSelected = selected.includes(m.slug);
+                      return (
+                        <button
+                          key={m.slug}
+                          onClick={() => toggleMembership(m.slug)}
+                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+                            isSelected
+                              ? "bg-accent border-2 border-primary shadow-card"
+                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+                          }`}
+                        >
+                          <span className="text-lg">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
+                          <span className="text-xs font-medium text-foreground leading-tight">
+                            {m.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
+            {/* Show uncategorized memberships */}
+            {filteredMemberships
+              .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
+              .length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-muted-foreground mb-2">🏷️ אחר</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {filteredMemberships
+                    .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
+                    .map((m) => {
+                      const isSelected = selected.includes(m.slug);
+                      return (
+                        <button
+                          key={m.slug}
+                          onClick={() => toggleMembership(m.slug)}
+                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+                            isSelected
+                              ? "bg-accent border-2 border-primary shadow-card"
+                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+                          }`}
+                        >
+                          <span className="text-lg">🏷️</span>
+                          <span className="text-xs font-medium text-foreground leading-tight">
+                            {m.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
