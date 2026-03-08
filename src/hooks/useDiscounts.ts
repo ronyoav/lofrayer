@@ -1,0 +1,82 @@
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { BRAND_LOGOS } from "@/data/mockData";
+
+export type DbDiscount = {
+  id: string;
+  brand: string;
+  brand_logo_url: string | null;
+  title: string;
+  description: string | null;
+  discount_value: string;
+  membership_id: string;
+  category: string | null;
+  location: string | null;
+  redeem_url: string | null;
+  is_active: boolean;
+  membership: {
+    id: string;
+    slug: string;
+    name: string;
+  } | null;
+};
+
+export type DbMembership = {
+  id: string;
+  slug: string;
+  name: string;
+  logo_url: string | null;
+  color: string | null;
+};
+
+export function useDiscounts(membershipSlugs: string[]) {
+  return useQuery({
+    queryKey: ["discounts", membershipSlugs],
+    queryFn: async () => {
+      // First get membership IDs from slugs
+      const { data: memberships } = await supabase
+        .from("memberships")
+        .select("id, slug, name")
+        .in("slug", membershipSlugs);
+
+      if (!memberships || memberships.length === 0) return [];
+
+      const membershipIds = memberships.map((m) => m.id);
+      const membershipMap = Object.fromEntries(
+        memberships.map((m) => [m.id, m])
+      );
+
+      const { data: discounts, error } = await supabase
+        .from("discounts")
+        .select("*")
+        .in("membership_id", membershipIds)
+        .eq("is_active", true);
+
+      if (error) throw error;
+
+      return (discounts || []).map((d) => ({
+        ...d,
+        membership: membershipMap[d.membership_id] || null,
+        // Use local brand logo if available, otherwise DB logo
+        brandLogo: BRAND_LOGOS[d.brand] || d.brand_logo_url || null,
+        membershipName: membershipMap[d.membership_id]?.name || "",
+      }));
+    },
+    enabled: membershipSlugs.length > 0,
+  });
+}
+
+export function useMemberships() {
+  return useQuery({
+    queryKey: ["memberships"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("memberships")
+        .select("*")
+        .order("name");
+
+      if (error) throw error;
+      return data as DbMembership[];
+    },
+  });
+}
