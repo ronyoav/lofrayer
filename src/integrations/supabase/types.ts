@@ -14,7 +14,101 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      discounts: {
+        Row: {
+          brand: string
+          brand_logo_url: string | null
+          category: string | null
+          created_at: string
+          description: string | null
+          discount_value: string
+          expires_at: string | null
+          id: string
+          is_active: boolean
+          location: string | null
+          membership_id: string
+          redeem_url: string | null
+          scraped_at: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          brand: string
+          brand_logo_url?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          discount_value: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          location?: string | null
+          membership_id: string
+          redeem_url?: string | null
+          scraped_at?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          brand?: string
+          brand_logo_url?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          discount_value?: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          location?: string | null
+          membership_id?: string
+          redeem_url?: string | null
+          scraped_at?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discounts_membership_id_fkey"
+            columns: ["membership_id"]
+            isOneToOne: false
+            referencedRelation: "memberships"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memberships: {
+        Row: {
+          color: string | null
+          created_at: string
+          id: string
+          logo_url: string | null
+          name: string
+          scrape_url: string | null
+          slug: string
+          website_url: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name: string
+          scrape_url?: string | null
+          slug: string
+          website_url?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name?: string
+          scrape_url?: string | null
+          slug?: string
+          website_url?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
