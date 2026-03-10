@@ -77,8 +77,8 @@ const DashboardPage = () => {
   const handleScrapeOne = async (slug: string, name: string) => {
     setScrapingSlug(slug);
     try {
-      // Try Bright Data first (Israeli proxy), fallback to Firecrawl
-      const { data, error } = await supabase.functions.invoke('scrape-brightdata', {
+      // Use WebScraping.ai (Israeli residential proxy) for scraping
+      const { data, error } = await supabase.functions.invoke('scrape-oracle', {
         body: { slug },
       });
       if (error) throw error;
