@@ -34,7 +34,6 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
 
-    // Get membership
     const { data: membership, error: membershipError } = await supabase
       .from('memberships')
       .select('*')
@@ -49,26 +48,35 @@ Deno.serve(async (req) => {
     }
 
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
-    console.log(`Starting WebScraping.ai scrape for ${membership.name} at ${scrapeUrl}`);
+    console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // Step 1: Fetch page HTML via WebScraping.ai with Israeli proxy
-    const html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
+    // Try WebScraping.ai first, then Firecrawl as fallback
+    let html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
+    let strategy = 'webscraping.ai';
+
+    if (!html) {
+      // Fallback: try Firecrawl
+      const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
+      if (firecrawlKey) {
+        console.log('Falling back to Firecrawl...');
+        html = await fetchWithFirecrawl(firecrawlKey, scrapeUrl);
+        strategy = 'firecrawl';
+      }
+    }
 
     if (!html) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch page via WebScraping.ai' }),
+        JSON.stringify({ success: false, error: 'Failed to fetch page (all strategies failed)' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Got HTML: ${Math.round(html.length / 1024)}KB`);
+    console.log(`Got content via ${strategy}: ${Math.round(html.length / 1024)}KB`);
 
-    // Step 2: Parse HTML with AI to extract discounts
     const discounts = await parseHtmlWithAI(lovableApiKey, html, membership);
     console.log(`Extracted ${discounts.length} discounts`);
 
     if (discounts.length > 0) {
-      // Deactivate old scraped discounts for this membership
       await supabase
         .from('discounts')
         .update({ is_active: false })
@@ -106,6 +114,7 @@ Deno.serve(async (req) => {
         success: true,
         membership: membership.name,
         discountsFound: discounts.length,
+        strategy,
         htmlSize: `${Math.round(html.length / 1024)}KB`,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -119,39 +128,9 @@ Deno.serve(async (req) => {
   }
 });
 
-// ─── WebScraping.ai Fetch (Israeli IP) ───
+// ─── WebScraping.ai (Israeli residential proxy) ───
 
 async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promise<string | null> {
-  // Try multiple approaches since behatzada.mod.gov.il has DNS-level geo-blocking
-  
-  // Approach 1: Use /ai/question endpoint to extract data directly
-  try {
-    const params = new URLSearchParams({
-      api_key: apiKey,
-      url: targetUrl,
-      question: 'Extract all consumer discounts, benefits and deals shown on this page. For each one provide: brand name, title, description, discount value, category, and any redemption link.',
-      country: 'il',
-      proxy: 'residential',
-    });
-
-    const endpoint = `https://api.webscraping.ai/ai/question?${params.toString()}`;
-    console.log('Trying WebScraping.ai /ai/question endpoint');
-
-    const response = await fetch(endpoint);
-    console.log(`/ai/question response status: ${response.status}`);
-
-    if (response.ok) {
-      const text = await response.text();
-      console.log(`Got AI response: ${text.substring(0, 200)}`);
-      return text;
-    }
-    const errText = await response.text();
-    console.error(`/ai/question error [${response.status}]: ${errText.substring(0, 300)}`);
-  } catch (err) {
-    console.error('/ai/question failed:', err);
-  }
-
-  // Approach 2: Standard HTML fetch with residential proxy
   try {
     const params = new URLSearchParams({
       api_key: apiKey,
@@ -162,50 +141,63 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
       timeout: '45000',
     });
 
-    const endpoint = `https://api.webscraping.ai/html?${params.toString()}`;
-    console.log('Trying WebScraping.ai /html endpoint');
+    console.log('Trying WebScraping.ai /html with residential IL proxy...');
+    const response = await fetch(`https://api.webscraping.ai/html?${params.toString()}`);
+    console.log(`WebScraping.ai status: ${response.status}`);
 
-    const response = await fetch(endpoint);
-    console.log(`/html response status: ${response.status}`);
+    if (response.ok) {
+      const text = await response.text();
+      console.log(`WebScraping.ai returned ${text.length} chars`);
+      return text;
+    }
 
-    const response = await fetch(endpoint, {
+    const errText = await response.text();
+    console.error(`WebScraping.ai error [${response.status}]: ${errText.substring(0, 500)}`);
+
+    // Retry without JS rendering on timeout
+    if (response.status === 504 || response.status === 408) {
+      console.log('Retrying without JS rendering...');
+      params.set('render_js', '0');
+      const retry = await fetch(`https://api.webscraping.ai/html?${params.toString()}`);
+      if (retry.ok) return await retry.text();
+      console.error(`Retry failed [${retry.status}]`);
+    }
+
+    return null;
+  } catch (err) {
+    console.error('WebScraping.ai error:', err);
+    return null;
+  }
+}
+
+// ─── Firecrawl fallback ───
+
+async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string | null> {
+  try {
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
       headers: {
-        'Accept-Language': 'he-IL,he;q=0.9',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        url,
+        formats: ['markdown'],
+        onlyMainContent: true,
+        waitFor: 5000,
+        location: { country: 'IL', languages: ['he'] },
+      }),
     });
 
-    console.log(`WebScraping.ai response status: ${response.status}`);
-
     if (!response.ok) {
-      const errText = await response.text();
-      console.error(`WebScraping.ai error [${response.status}]: ${errText.substring(0, 500)}`);
-
-      // Retry without JS rendering if it times out
-      if (response.status === 504 || response.status === 408) {
-        console.log('Retrying without JS rendering...');
-        const retryParams = new URLSearchParams({
-          api_key: apiKey,
-          url: targetUrl,
-          country: 'il',
-          render_js: '0',
-          proxy: 'residential',
-        });
-        const retryResponse = await fetch(`https://api.webscraping.ai/html?${retryParams.toString()}`);
-        console.log(`Retry response status: ${retryResponse.status}`);
-        if (retryResponse.ok) {
-          return await retryResponse.text();
-        }
-        const retryErr = await retryResponse.text();
-        console.error(`Retry error: ${retryErr.substring(0, 500)}`);
-      }
+      console.error(`Firecrawl error [${response.status}]`);
       return null;
     }
 
-    const text = await response.text();
-    console.log(`Got ${text.length} chars of HTML`);
-    return text;
+    const data = await response.json();
+    return data.data?.markdown || data.markdown || null;
   } catch (err) {
-    console.error('WebScraping.ai fetch error:', err);
+    console.error('Firecrawl error:', err);
     return null;
   }
 }
@@ -215,7 +207,7 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
 async function parseHtmlWithAI(apiKey: string, html: string, membership: any): Promise<any[]> {
   const truncatedHtml = html.length > 100000 ? html.substring(0, 100000) : html;
 
-  const prompt = `אתה מנתח HTML של דף הטבות מאתר מועדון "${membership.name}".
+  const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
 חלץ את כל ההנחות הצרכניות שאתה מוצא (מותגים, חנויות, מסעדות, קולנוע, חופשות).
 אל תכלול מענקים ממשלתיים, תגמולים, סיוע כלכלי או זכאויות.
 
@@ -226,7 +218,7 @@ async function parseHtmlWithAI(apiKey: string, html: string, membership: any): P
 - discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה")
 - category: קטגוריה (אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
 - location: מיקום אם מצוין (או "כל הארץ")
-- redeem_url: קישור למימוש ההטבה אם מופיע ב-HTML
+- redeem_url: קישור למימוש ההטבה אם מופיע
 
 החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].`;
 
@@ -236,7 +228,7 @@ async function parseHtmlWithAI(apiKey: string, html: string, membership: any): P
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
-        messages: [{ role: 'user', content: `${prompt}\n\nHTML content:\n${truncatedHtml}` }],
+        messages: [{ role: 'user', content: `${prompt}\n\nContent:\n${truncatedHtml}` }],
         temperature: 0.1,
       }),
     });
