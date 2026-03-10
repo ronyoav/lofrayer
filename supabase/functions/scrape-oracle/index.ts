@@ -135,6 +135,7 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
 
     const endpoint = `https://api.webscraping.ai/html?${params.toString()}`;
     console.log(`Fetching via WebScraping.ai (country=il): ${targetUrl}`);
+    console.log(`Full URL: ${endpoint.replace(apiKey, 'REDACTED')}`);
 
     const response = await fetch(endpoint, {
       headers: {
@@ -142,9 +143,11 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
       },
     });
 
+    console.log(`WebScraping.ai response status: ${response.status}`);
+
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`WebScraping.ai error [${response.status}]: ${errText}`);
+      console.error(`WebScraping.ai error [${response.status}]: ${errText.substring(0, 500)}`);
 
       // Retry without JS rendering if it times out
       if (response.status === 504 || response.status === 408) {
@@ -157,14 +160,19 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
           proxy: 'residential',
         });
         const retryResponse = await fetch(`https://api.webscraping.ai/html?${retryParams.toString()}`);
+        console.log(`Retry response status: ${retryResponse.status}`);
         if (retryResponse.ok) {
           return await retryResponse.text();
         }
+        const retryErr = await retryResponse.text();
+        console.error(`Retry error: ${retryErr.substring(0, 500)}`);
       }
       return null;
     }
 
-    return await response.text();
+    const text = await response.text();
+    console.log(`Got ${text.length} chars of HTML`);
+    return text;
   } catch (err) {
     console.error('WebScraping.ai fetch error:', err);
     return null;
