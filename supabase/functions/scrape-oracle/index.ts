@@ -122,20 +122,51 @@ Deno.serve(async (req) => {
 // ─── WebScraping.ai Fetch (Israeli IP) ───
 
 async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promise<string | null> {
+  // Try multiple approaches since behatzada.mod.gov.il has DNS-level geo-blocking
+  
+  // Approach 1: Use /ai/question endpoint to extract data directly
   try {
-    // Use WebScraping.ai with country=il for Israeli IP
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      url: targetUrl,
+      question: 'Extract all consumer discounts, benefits and deals shown on this page. For each one provide: brand name, title, description, discount value, category, and any redemption link.',
+      country: 'il',
+      proxy: 'residential',
+    });
+
+    const endpoint = `https://api.webscraping.ai/ai/question?${params.toString()}`;
+    console.log('Trying WebScraping.ai /ai/question endpoint');
+
+    const response = await fetch(endpoint);
+    console.log(`/ai/question response status: ${response.status}`);
+
+    if (response.ok) {
+      const text = await response.text();
+      console.log(`Got AI response: ${text.substring(0, 200)}`);
+      return text;
+    }
+    const errText = await response.text();
+    console.error(`/ai/question error [${response.status}]: ${errText.substring(0, 300)}`);
+  } catch (err) {
+    console.error('/ai/question failed:', err);
+  }
+
+  // Approach 2: Standard HTML fetch with residential proxy
+  try {
     const params = new URLSearchParams({
       api_key: apiKey,
       url: targetUrl,
       country: 'il',
-      render_js: '1', // Enable JS rendering for SPAs
-      proxy: 'residential', // Residential proxy = real Israeli IP
-      timeout: '30000',
+      render_js: '1',
+      proxy: 'residential',
+      timeout: '45000',
     });
 
     const endpoint = `https://api.webscraping.ai/html?${params.toString()}`;
-    console.log(`Fetching via WebScraping.ai (country=il): ${targetUrl}`);
-    console.log(`Full URL: ${endpoint.replace(apiKey, 'REDACTED')}`);
+    console.log('Trying WebScraping.ai /html endpoint');
+
+    const response = await fetch(endpoint);
+    console.log(`/html response status: ${response.status}`);
 
     const response = await fetch(endpoint, {
       headers: {
