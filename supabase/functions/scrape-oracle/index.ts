@@ -11,10 +11,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const proxyUrl = Deno.env.get('ORACLE_PROXY_URL');
-    if (!proxyUrl) {
+    const webscrapingKey = Deno.env.get('WEBSCRAPING_AI_KEY');
+    if (!webscrapingKey) {
       return new Response(
-        JSON.stringify({ error: 'ORACLE_PROXY_URL not configured. Set it to your Oracle Cloud proxy address (e.g. http://YOUR_IP:3128)' }),
+        JSON.stringify({ error: 'WEBSCRAPING_AI_KEY not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -49,14 +49,14 @@ Deno.serve(async (req) => {
     }
 
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
-    console.log(`Starting Oracle proxy scrape for ${membership.name} at ${scrapeUrl}`);
+    console.log(`Starting WebScraping.ai scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // Step 1: Fetch page HTML via Oracle Cloud proxy
-    const html = await fetchViaProxy(proxyUrl, scrapeUrl);
+    // Step 1: Fetch page HTML via WebScraping.ai with Israeli proxy
+    const html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
 
     if (!html) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch page via Oracle proxy' }),
+        JSON.stringify({ success: false, error: 'Failed to fetch page via WebScraping.ai' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -119,37 +119,54 @@ Deno.serve(async (req) => {
   }
 });
 
-// ─── Oracle Cloud Proxy Fetch ───
+// ─── WebScraping.ai Fetch (Israeli IP) ───
 
-async function fetchViaProxy(proxyUrl: string, targetUrl: string): Promise<string | null> {
+async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promise<string | null> {
   try {
-    // The proxy server expects a POST with the target URL
-    // It fetches the page from an Israeli IP and returns the HTML
-    const endpoint = `${proxyUrl.replace(/\/$/, '')}/fetch`;
-    console.log(`Fetching via Oracle proxy: ${endpoint}`);
+    // Use WebScraping.ai with country=il for Israeli IP
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      url: targetUrl,
+      country: 'il',
+      render_js: '1', // Enable JS rendering for SPAs
+      proxy: 'residential', // Residential proxy = real Israeli IP
+      timeout: '30000',
+    });
+
+    const endpoint = `https://api.webscraping.ai/html?${params.toString()}`;
+    console.log(`Fetching via WebScraping.ai (country=il): ${targetUrl}`);
 
     const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: targetUrl,
-        headers: {
-          'Accept-Language': 'he-IL,he;q=0.9',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      }),
+      headers: {
+        'Accept-Language': 'he-IL,he;q=0.9',
+      },
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Proxy error [${response.status}]: ${errText}`);
+      console.error(`WebScraping.ai error [${response.status}]: ${errText}`);
+
+      // Retry without JS rendering if it times out
+      if (response.status === 504 || response.status === 408) {
+        console.log('Retrying without JS rendering...');
+        const retryParams = new URLSearchParams({
+          api_key: apiKey,
+          url: targetUrl,
+          country: 'il',
+          render_js: '0',
+          proxy: 'residential',
+        });
+        const retryResponse = await fetch(`https://api.webscraping.ai/html?${retryParams.toString()}`);
+        if (retryResponse.ok) {
+          return await retryResponse.text();
+        }
+      }
       return null;
     }
 
-    const data = await response.json();
-    return data.html || data.body || await response.text();
+    return await response.text();
   } catch (err) {
-    console.error('Proxy fetch error:', err);
+    console.error('WebScraping.ai fetch error:', err);
     return null;
   }
 }
