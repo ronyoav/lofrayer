@@ -1,12 +1,10 @@
-import { Discount } from "@/data/mockData";
-
 interface DiscountCardProps {
-  discount: Discount;
+  discount: any;
 }
 
 const DiscountCard = ({ discount }: DiscountCardProps) => {
   return (
-    <a
+    
       href={discount.redeemUrl}
       target="_blank"
       rel="noopener noreferrer"
@@ -15,7 +13,7 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
       <div className="p-4 flex items-start gap-4">
         <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-accent flex items-center justify-center overflow-hidden">
           <img
-            src={discount.brandLogo}
+            src={discount.brandLogo || discount.brand_logo_url || ''}
             alt={discount.brand}
             className="w-12 h-12 object-contain"
           />
@@ -26,16 +24,16 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
               {discount.brand}
             </h3>
             <span className="flex-shrink-0 mr-2 inline-flex items-center rounded-full bg-savings-light px-3 py-1 text-sm font-bold text-accent-foreground">
-              {discount.discountValue}
+              {discount.discountValue || discount.discount_value}
             </span>
           </div>
           <p className="text-sm text-foreground mb-1 leading-snug">
-          {discount.title}
+            {discount.title}
           </p>
           {discount.description && (
-          <p className="text-xs text-muted-foreground mb-1 leading-snug">
-          {discount.description}
-          </p>
+            <p className="text-xs text-muted-foreground mb-1 leading-snug">
+              {discount.description}
+            </p>
           )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5">
