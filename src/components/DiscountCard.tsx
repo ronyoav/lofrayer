@@ -30,8 +30,13 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
             </span>
           </div>
           <p className="text-sm text-foreground mb-1 leading-snug">
-            {discount.title}
+          {discount.title}
           </p>
+          {discount.description && (
+          <p className="text-xs text-muted-foreground mb-1 leading-snug">
+          {discount.description}
+          </p>
+          )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5">
               {discount.membershipName}
