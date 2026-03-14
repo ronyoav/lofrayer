@@ -1,11 +1,10 @@
 interface DiscountCardProps {
   discount: any;
 }
-
 const DiscountCard = ({ discount }: DiscountCardProps) => {
   return (
     
-      href={discount.redeemUrl}
+      href={discount.redeem_url || discount.redeemUrl || '#'}
       target="_blank"
       rel="noopener noreferrer"
       className="block rounded-2xl bg-card shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden group"
@@ -55,5 +54,4 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
     </a>
   );
 };
-
 export default DiscountCard;
