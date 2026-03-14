@@ -1,47 +1,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
 @layer base {
   :root {
-    --background: 30 30% 98%;
+    --background: 220 30% 98%;
     --foreground: 220 20% 12%;
-
     --card: 0 0% 100%;
     --card-foreground: 220 20% 12%;
-
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 12%;
-
-    --primary: 24 95% 53%;
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
-
-    --secondary: 30 20% 94%;
+    --secondary: 217 20% 94%;
     --secondary-foreground: 220 20% 20%;
-
-    --muted: 30 15% 93%;
+    --muted: 217 15% 93%;
     --muted-foreground: 220 10% 46%;
-
-    --accent: 24 80% 95%;
-    --accent-foreground: 24 95% 40%;
-
+    --accent: 217 91% 95%;
+    --accent-foreground: 217 91% 40%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
-
-    --border: 30 15% 88%;
-    --input: 30 15% 88%;
-    --ring: 24 95% 53%;
-
+    --border: 217 15% 88%;
+    --input: 217 15% 88%;
+    --ring: 217 91% 60%;
     --radius: 0.75rem;
-
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
-
-    --savings: 24 95% 53%;
-    --savings-light: 24 80% 95%;
-
+    --savings: 217 91% 60%;
+    --savings-light: 217 91% 95%;
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
@@ -52,35 +38,28 @@
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
 }
-
 @layer base {
   * {
     @apply border-border;
   }
-
   html {
     direction: rtl;
   }
-
   body {
     @apply bg-background text-foreground font-heebo;
   }
 }
-
 @layer utilities {
   .gradient-primary {
-    background: linear-gradient(135deg, hsl(24 95% 53%), hsl(35 95% 58%));
+    background: linear-gradient(135deg, hsl(217 91% 60%), hsl(210 91% 65%));
   }
-
   .gradient-hero {
-    background: linear-gradient(180deg, hsl(24 80% 95%) 0%, hsl(30 30% 98%) 100%);
+    background: linear-gradient(180deg, hsl(217 91% 95%) 0%, hsl(220 30% 98%) 100%);
   }
-
   .shadow-card {
-    box-shadow: 0 2px 12px -2px hsl(24 30% 50% / 0.1), 0 1px 4px -1px hsl(24 30% 50% / 0.06);
+    box-shadow: 0 2px 12px -2px hsl(217 30% 50% / 0.1), 0 1px 4px -1px hsl(217 30% 50% / 0.06);
   }
-
   .shadow-card-hover {
-    box-shadow: 0 8px 24px -4px hsl(24 30% 50% / 0.15), 0 2px 8px -2px hsl(24 30% 50% / 0.1);
+    box-shadow: 0 8px 24px -4px hsl(217 30% 50% / 0.15), 0 2px 8px -2px hsl(217 30% 50% / 0.1);
   }
 }
