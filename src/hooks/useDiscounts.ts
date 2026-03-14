@@ -61,7 +61,9 @@ export function useDiscounts(membershipSlugs: string[]) {
         membership: membershipMap[d.membership_id] || null,
         // Use local brand logo if available, otherwise DB logo
         brandLogo: BRAND_LOGOS[d.brand] || d.brand_logo_url || null,
-        membershipName: membershipMap[d.membership_id]?.name || "",
+        membershipName: (membershipMap[d.membership_id]?.name || "")
+          .replace('פועלים Wonder - מזון', 'פועלים Wonder')
+          .replace('פועלים Wonder - בידור', 'פועלים Wonder'),
       }));
     },
     enabled: membershipSlugs.length > 0,
@@ -76,9 +78,13 @@ export function useMemberships() {
         .from("memberships")
         .select("*")
         .order("name");
-
       if (error) throw error;
-      return data as DbMembership[];
+
+      // Group Poalim Wonder sub-memberships under one entry
+      const filtered = (data as DbMembership[]).filter(
+        (m) => !['poalim-wonder-food', 'poalim-wonder-movies'].includes(m.slug)
+      );
+      return filtered;
     },
   });
 }
