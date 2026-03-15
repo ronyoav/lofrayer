@@ -3,7 +3,7 @@ interface DiscountCardProps {
 }
 const DiscountCard = ({ discount }: DiscountCardProps) => {
   return (
-    
+    <a
       href={discount.redeem_url || discount.redeemUrl || '#'}
       target="_blank"
       rel="noopener noreferrer"
