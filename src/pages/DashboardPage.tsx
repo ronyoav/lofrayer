@@ -27,7 +27,6 @@ const DashboardPage = () => {
   const { data: discounts = [], isLoading, refetch } = useDiscounts(userMemberships);
   const { data: allMemberships = [] } = useMemberships();
 
-  // Get only memberships the user selected
   const myMemberships = useMemo(() => {
     return allMemberships.filter((m) => userMemberships.includes(m.slug));
   }, [allMemberships, userMemberships]);
@@ -77,7 +76,6 @@ const DashboardPage = () => {
   const handleScrapeOne = async (slug: string, name: string) => {
     setScrapingSlug(slug);
     try {
-      // Use WebScraping.ai (Israeli residential proxy) for scraping
       const { data, error } = await supabase.functions.invoke('scrape-oracle', {
         body: { slug },
       });
@@ -85,7 +83,7 @@ const DashboardPage = () => {
       if (data?.success) {
         toast({
           title: `הנחות ${name}`,
-          description: `נמצאו ${data.discountsFound} הנחות חדשות (Bright Data)`,
+          description: `נמצאו ${data.discountsFound} הנחות חדשות`,
         });
       } else {
         toast({
@@ -109,7 +107,7 @@ const DashboardPage = () => {
         <div className="mx-auto max-w-md">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold">🔍 חיפוש הטבות</h1>
+              <h1 className="text-2xl font-bold">LoFrayer 🔍</h1>
               <p className="text-sm opacity-90">
                 {filteredDiscounts.length} הנחות זמינות
               </p>
