@@ -1,0 +1,19 @@
+Scraping Attempts Summary
+1. Local Attempts (Python + Playwright)
+Initial attempts were made using local Playwright scripts, which failed due to infrastructure issues:
+
+Network errors such as ERR_NAME_NOT_RESOLVED and ERR_CONNECTION_TIMED_OUT.
+
+Connectivity problems attributed to unstable work Wi-Fi or local DNS blocks.
+
+2. External APIs & Cloud Solutions
+Attempts to bypass local issues using managed services:
+
+Used WebScraping.ai and Firecrawl.
+
+Tried using browserless.io.
+
+The Result: All these services failed due to geographic blocking (selective DNS) by the website for IP addresses outside of Israel.
+
+3. The Successful Solution
+Setting up a Browserless server on a Google Cloud instance with an Israeli IP address. This setup provided stable access and successfully bypassed all regional restrictions.
