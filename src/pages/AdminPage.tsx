@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Plus, Trash2, Edit2, Save, X, Loader2 } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Edit2, Save, X, Loader2, Camera } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,6 +54,55 @@ const AdminPage = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Screenshot upload state
+  const [screenshotMembership, setScreenshotMembership] = useState<string>("");
+  const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
+  const [isProcessingScreenshots, setIsProcessingScreenshots] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleScreenshotUpload = async () => {
+    if (!screenshotMembership || screenshotFiles.length === 0) {
+      toast({ title: "שגיאה", description: "בחר מועדון והעלה לפחות תמונה אחת", variant: "destructive" });
+      return;
+    }
+    setIsProcessingScreenshots(true);
+    try {
+      const toBase64 = (file: File): Promise<string> =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+      const images = await Promise.all(screenshotFiles.map(toBase64));
+      const membership = allMemberships.find((m) => m.id === screenshotMembership);
+
+      const { data, error } = await supabase.functions.invoke("process-screenshots", {
+        body: {
+          images,
+          membership_slug: membership?.slug,
+          skip_deactivate: false,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "עיבוד הושלם",
+        description: `נמצאו ${data?.discountsFound ?? 0} הנחות מ-${screenshotFiles.length} תמונות`,
+      });
+      setScreenshotFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      queryClient.invalidateQueries({ queryKey: ["discounts"] });
+      refetch();
+    } catch (err: any) {
+      toast({ title: "שגיאה", description: err.message, variant: "destructive" });
+    } finally {
+      setIsProcessingScreenshots(false);
+    }
+  };
 
   // Get all membership slugs for fetching discounts
   const allSlugs = allMemberships.map((m) => m.slug);
@@ -181,6 +230,55 @@ const AdminPage = () => {
 
           <Button onClick={() => { setIsAdding(true); setEditingId(null); setForm(emptyForm); }}>
             <Plus className="ml-1 h-4 w-4" /> הוסף הנחה
+          </Button>
+        </div>
+
+        {/* Screenshot Upload (for login-protected sites like Isracard) */}
+        <div className="rounded-2xl border bg-card p-5 space-y-4 shadow-sm">
+          <h2 className="font-bold text-lg flex items-center gap-2">
+            <Camera className="h-5 w-5" />
+            ייבוא הנחות מצילומי מסך
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            לאתרים שדורשים התחברות (כגון ישראכרט): התחבר לאתר, צלם מסך של דף ההטבות ועלה כאן — ה-AI יחלץ את ההנחות אוטומטית.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">מועדון *</label>
+              <Select value={screenshotMembership} onValueChange={setScreenshotMembership}>
+                <SelectTrigger>
+                  <SelectValue placeholder="בחר מועדון" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allMemberships.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">
+                תמונות ({screenshotFiles.length} נבחרו)
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="block w-full text-sm text-muted-foreground file:ml-2 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-accent file:text-accent-foreground hover:file:bg-accent/80 cursor-pointer"
+                onChange={(e) => setScreenshotFiles(Array.from(e.target.files || []))}
+              />
+            </div>
+          </div>
+          <Button
+            onClick={handleScreenshotUpload}
+            disabled={isProcessingScreenshots || !screenshotMembership || screenshotFiles.length === 0}
+          >
+            {isProcessingScreenshots ? (
+              <><Loader2 className="ml-1 h-4 w-4 animate-spin" /> מעבד תמונות...</>
+            ) : (
+              <><Camera className="ml-1 h-4 w-4" /> עבד {screenshotFiles.length > 0 ? `${screenshotFiles.length} תמונות` : "תמונות"}</>
+            )}
           </Button>
         </div>
 

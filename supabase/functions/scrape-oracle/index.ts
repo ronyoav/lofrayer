@@ -50,6 +50,47 @@ Deno.serve(async (req) => {
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
+    // ─── Isracard: direct window.epi JSON extraction ───
+    const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
+    if (isIsracard) {
+      console.log('Isracard detected — using window.epi direct extraction');
+      const israHtml = await fetchWithWebScrapingAI(webscrapingKey, 'https://benefits.isracard.co.il/');
+      if (israHtml) {
+        const discounts = extractIsracardBenefits(israHtml, membership);
+        console.log(`Extracted ${discounts.length} Isracard discounts`);
+        if (discounts.length > 0) {
+          await supabase.from('discounts').update({ is_active: false })
+            .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+          const { error: insertError } = await supabase.from('discounts').insert(
+            discounts.map((d: any) => ({
+              brand: d.brand,
+              title: d.title,
+              description: d.description || null,
+              discount_value: d.discount_value,
+              category: d.category,
+              location: 'כל הארץ',
+              redeem_url: d.redeem_url,
+              membership_id: membership.id,
+              scraped_at: new Date().toISOString(),
+              is_active: true,
+            }))
+          );
+          if (insertError) {
+            console.error('Insert error:', insertError);
+            return new Response(
+              JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          return new Response(
+            JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'window.epi' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+      console.log('window.epi extraction failed, falling back to generic scraper');
+    }
+
     // Try WebScraping.ai first, then Firecrawl as fallback
     let html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
     let strategy = 'webscraping.ai';
@@ -200,6 +241,79 @@ async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string |
     console.error('Firecrawl error:', err);
     return null;
   }
+}
+
+// ─── Isracard: extract window.epi JSON from HTML ───
+
+function extractIsracardBenefits(html: string, membership: any): any[] {
+  try {
+    // Find window.epi = { ... } in the script tag
+    const startIdx = html.indexOf('window.epi = ');
+    if (startIdx < 0) {
+      console.error('window.epi not found in HTML');
+      return [];
+    }
+    const jsonStart = html.indexOf('{', startIdx);
+    // Walk forward counting braces to find the matching closing brace
+    let depth = 0;
+    let i = jsonStart;
+    while (i < html.length) {
+      const ch = html[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      i++;
+    }
+    const jsonStr = html.substring(jsonStart, i + 1);
+    const epi = JSON.parse(jsonStr);
+    const benefits: any[] = epi?.CurrentPage?.Benefits || [];
+    console.log(`window.epi has ${benefits.length} benefits`);
+
+    const CATEGORY_MAP: Record<string, string> = {
+      'מומלצות': 'כללי',
+      'נוסעים לחו"ל': 'תיירות',
+      'הטבות אונליין': 'כללי',
+      'כרטיס Top': 'כללי',
+      'אטרקציות': 'בידור',
+      'קולנוע': 'בידור',
+      'הורים וילדים': 'כללי',
+      'בילוי ופנאי': 'בידור',
+      'הטבות נתב"ג': 'תיירות',
+    };
+
+    return benefits
+      .filter((b: any) => !b.OutOfStock && b.MobileBenefitName)
+      .map((b: any) => {
+        const name: string = b.MobileBenefitName || '';
+        const brand: string = b.MobileDescription || b.TitlePart1 || name.split(' ').slice(-1)[0];
+        const discountValue = extractDiscountFromName(name);
+        const israCategory = b.Category?.Name || '';
+        const category = CATEGORY_MAP[israCategory] || 'כללי';
+        const link: string = b.LinkUrl || '';
+        const redeemUrl = link.startsWith('http')
+          ? link
+          : link ? `https://benefits.isracard.co.il${link}` : 'https://benefits.isracard.co.il/';
+        // Strip HTML from description
+        const desc = (b.BenefitPageDescText || '')
+          .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 300) || null;
+        return { brand, title: name, description: desc, discount_value: discountValue, category, redeem_url: redeemUrl };
+      });
+  } catch (err) {
+    console.error('extractIsracardBenefits error:', err);
+    return [];
+  }
+}
+
+function extractDiscountFromName(name: string): string {
+  const pct = name.match(/(\d+)\s*%/);
+  if (pct) return `${pct[1]}%`;
+  const shekel = name.match(/(\d+)\s*₪/);
+  if (shekel) return `${shekel[1]}₪`;
+  const dollar = name.match(/(\d+)\s*\$/);
+  if (dollar) return `${dollar[1]}$`;
+  const plus = name.match(/(\d)\+(\d)/);
+  if (plus) return `${plus[1]}+${plus[2]}`;
+  if (/חינם/.test(name)) return 'חינם';
+  return name.substring(0, 25);
 }
 
 // ─── AI Parsing ───
