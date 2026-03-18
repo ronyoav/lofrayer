@@ -19,10 +19,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
+    const geminiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiKey) {
       return new Response(
-        JSON.stringify({ success: false, error: 'LOVABLE_API_KEY not configured' }),
+        JSON.stringify({ success: false, error: 'GEMINI_API_KEY not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -94,8 +94,8 @@ Deno.serve(async (req) => {
 
         // Parse with AI
         const discounts = content.screenshot
-          ? await parseScreenshotWithAI(lovableApiKey, content.screenshot, membership)
-          : await parseWithAI(lovableApiKey, content.markdown!, membership, content.links || []);
+          ? await parseScreenshotWithAI(geminiKey, content.screenshot, membership)
+          : await parseWithAI(geminiKey, content.markdown!, membership, content.links || []);
 
         if (discounts.length > 0) {
           await supabase
@@ -355,31 +355,52 @@ async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, m
   ]);
 }
 
-// ─── Shared AI call ───
+// ─── Shared AI call (Google Gemini — free tier) ───
 
-async function callAI(apiKey: string, messages: any[]): Promise<any[]> {
+async function callAI(geminiKey: string, messages: any[]): Promise<any[]> {
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages,
-        temperature: 0.1,
-      }),
-    });
+    // Convert OpenAI-style messages to Gemini format
+    const lastMessage = messages[messages.length - 1];
+    let parts: any[];
+
+    if (Array.isArray(lastMessage.content)) {
+      // Vision message with image
+      parts = lastMessage.content.map((c: any) => {
+        if (c.type === 'text') return { text: c.text };
+        if (c.type === 'image_url') {
+          const url: string = c.image_url?.url || '';
+          const base64 = url.startsWith('data:') ? url.split(',')[1] : url;
+          return { inline_data: { mime_type: 'image/png', data: base64 } };
+        }
+        return { text: '' };
+      });
+    } else {
+      parts = [{ text: lastMessage.content }];
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { temperature: 0.1 },
+        }),
+      }
+    );
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`AI API error: ${response.status}`, errText);
+      console.error(`Gemini API error: ${response.status}`, errText);
       return [];
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
-      console.log('No JSON array found in AI response');
+      console.log('No JSON array found in Gemini response');
       return [];
     }
 
