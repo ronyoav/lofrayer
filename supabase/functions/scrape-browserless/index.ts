@@ -19,10 +19,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
+    const geminiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiKey) {
       return new Response(
-        JSON.stringify({ error: 'LOVABLE_API_KEY not configured' }),
+        JSON.stringify({ error: 'GEMINI_API_KEY not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
     const allDiscounts: any[] = [];
     for (let i = 0; i < screenshots.length; i++) {
       console.log(`Processing screenshot ${i + 1}/${screenshots.length}...`);
-      const discounts = await parseScreenshotWithAI(lovableApiKey, screenshots[i], membership);
+      const discounts = await parseScreenshotWithAI(geminiKey, screenshots[i], membership);
       allDiscounts.push(...discounts);
       if (i < screenshots.length - 1) await new Promise(r => setTimeout(r, 1000));
     }
@@ -296,9 +296,9 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// ─── AI Vision ───
+// ─── AI Vision (Google Gemini — free tier) ───
 
-async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
+async function parseScreenshotWithAI(geminiKey: string, screenshotBase64: string, membership: any): Promise<any[]> {
   const prompt = `אתה מנתח צילום מסך של דף הטבות מאתר מועדון "${membership.name}".
 חלץ את כל ההנחות הצרכניות שאתה רואה (מותגים, חנויות, מסעדות, קולנוע, חופשות).
 אל תכלול מענקים ממשלתיים, תגמולים, סיוע כלכלי או זכאויות.
@@ -313,32 +313,31 @@ async function parseScreenshotWithAI(apiKey: string, screenshotBase64: string, m
 
 החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].`;
 
-  const imageUrl = `data:image/png;base64,${screenshotBase64}`;
-
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: imageUrl } },
-          ],
-        }],
-        temperature: 0.1,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/png', data: screenshotBase64 } },
+            ],
+          }],
+          generationConfig: { temperature: 0.1 },
+        }),
+      }
+    );
 
     if (!response.ok) {
-      console.error(`AI error: ${response.status}`, await response.text());
+      console.error(`Gemini error: ${response.status}`, await response.text());
       return [];
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
 

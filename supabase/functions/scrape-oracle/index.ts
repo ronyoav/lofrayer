@@ -19,10 +19,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
+    const geminiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiKey) {
       return new Response(
-        JSON.stringify({ error: 'LOVABLE_API_KEY not configured' }),
+        JSON.stringify({ error: 'GEMINI_API_KEY not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
         const markdown = await fetchWithFirecrawl(firecrawlKey, israUrl, 12000, false);
         if (markdown && markdown.length > 300) {
           console.log(`Firecrawl returned ${markdown.length} chars for Isracard`);
-          const discounts = await parseHtmlWithAI(lovableApiKey, markdown, membership);
+          const discounts = await parseHtmlWithAI(geminiKey, markdown, membership);
           console.log(`AI extracted ${discounts.length} Isracard discounts`);
           if (discounts.length > 0) {
             await supabase.from('discounts').update({ is_active: false })
@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
 
     console.log(`Got content via ${strategy}: ${Math.round(html.length / 1024)}KB`);
 
-    const discounts = await parseHtmlWithAI(lovableApiKey, html, membership);
+    const discounts = await parseHtmlWithAI(geminiKey, html, membership);
     console.log(`Extracted ${discounts.length} discounts`);
 
     if (discounts.length > 0) {
@@ -257,9 +257,9 @@ async function fetchWithFirecrawl(apiKey: string, url: string, waitForMs = 5000,
   }
 }
 
-// ─── AI Parsing ───
+// ─── AI Parsing (Google Gemini — free tier) ───
 
-async function parseHtmlWithAI(apiKey: string, html: string, membership: any): Promise<any[]> {
+async function parseHtmlWithAI(geminiKey: string, html: string, membership: any): Promise<any[]> {
   const truncatedHtml = html.length > 100000 ? html.substring(0, 100000) : html;
 
   const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
@@ -278,23 +278,25 @@ async function parseHtmlWithAI(apiKey: string, html: string, membership: any): P
 החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].`;
 
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{ role: 'user', content: `${prompt}\n\nContent:\n${truncatedHtml}` }],
-        temperature: 0.1,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `${prompt}\n\nContent:\n${truncatedHtml}` }] }],
+          generationConfig: { temperature: 0.1 },
+        }),
+      }
+    );
 
     if (!response.ok) {
-      console.error(`AI error: ${response.status}`, await response.text());
+      console.error(`Gemini error: ${response.status}`, await response.text());
       return [];
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
 
