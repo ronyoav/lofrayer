@@ -50,48 +50,54 @@ Deno.serve(async (req) => {
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // ─── Isracard: direct window.epi JSON extraction ───
+    // ─── Isracard: Firecrawl JS rendering + AI parsing ───
+    // The site is a React SPA — window.epi doesn't exist in static HTML.
+    // We use Firecrawl (real browser, JS rendering) to get rendered content,
+    // then AI to extract the discounts.
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
-      console.log('Isracard detected — using window.epi direct extraction');
-      // Try direct fetch first (no proxy needed, site is public)
-      // then Firecrawl as fallback. WebScraping.ai gets 403 from this site.
-      const israHtml = await fetchIsracardDirect() ||
-        await fetchWithFirecrawlHtml(Deno.env.get('FIRECRAWL_API_KEY') || '', 'https://benefits.isracard.co.il/');
-      if (israHtml) {
-        const discounts = extractIsracardBenefits(israHtml, membership);
-        console.log(`Extracted ${discounts.length} Isracard discounts`);
-        if (discounts.length > 0) {
-          await supabase.from('discounts').update({ is_active: false })
-            .eq('membership_id', membership.id).not('scraped_at', 'is', null);
-          const { error: insertError } = await supabase.from('discounts').insert(
-            discounts.map((d: any) => ({
-              brand: d.brand,
-              title: d.title,
-              description: d.description || null,
-              discount_value: d.discount_value,
-              category: d.category,
-              location: 'כל הארץ',
-              redeem_url: d.redeem_url,
-              membership_id: membership.id,
-              scraped_at: new Date().toISOString(),
-              is_active: true,
-            }))
-          );
-          if (insertError) {
-            console.error('Insert error:', insertError);
+      console.log('Isracard detected — using Firecrawl JS rendering');
+      const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
+      if (firecrawlKey) {
+        const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
+        const markdown = await fetchWithFirecrawl(firecrawlKey, israUrl);
+        if (markdown && markdown.length > 300) {
+          console.log(`Firecrawl returned ${markdown.length} chars for Isracard`);
+          const discounts = await parseHtmlWithAI(lovableApiKey, markdown, membership);
+          console.log(`AI extracted ${discounts.length} Isracard discounts`);
+          if (discounts.length > 0) {
+            await supabase.from('discounts').update({ is_active: false })
+              .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+            const { error: insertError } = await supabase.from('discounts').insert(
+              discounts.map((d: any) => ({
+                brand: d.brand || 'ישראכרט',
+                title: d.title || '',
+                description: d.description || null,
+                discount_value: d.discount_value || '',
+                category: d.category || 'כללי',
+                location: d.location || 'כל הארץ',
+                redeem_url: d.redeem_url || israUrl,
+                membership_id: membership.id,
+                scraped_at: new Date().toISOString(),
+                is_active: true,
+              }))
+            );
+            if (insertError) {
+              console.error('Insert error:', insertError);
+              return new Response(
+                JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
+                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              );
+            }
             return new Response(
-              JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
-              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'firecrawl+ai' }),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
-          return new Response(
-            JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'window.epi' }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
         }
+      } else {
+        console.log('FIRECRAWL_API_KEY not set — falling back to generic scraper');
       }
-      console.log('window.epi extraction failed, falling back to generic scraper');
     }
 
     // Try WebScraping.ai first, then Firecrawl as fallback
@@ -244,132 +250,6 @@ async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string |
     console.error('Firecrawl error:', err);
     return null;
   }
-}
-
-// ─── Isracard: direct fetch (no proxy, site is publicly accessible) ───
-
-async function fetchIsracardDirect(): Promise<string | null> {
-  try {
-    console.log('Trying direct fetch for Isracard...');
-    const res = await fetch('https://benefits.isracard.co.il/', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8',
-      },
-    });
-    console.log(`Direct fetch status: ${res.status}`);
-    if (res.ok) {
-      const html = await res.text();
-      if (html.includes('window.epi')) return html;
-      console.log('Direct fetch OK but window.epi not found (SSR not included)');
-    }
-    return null;
-  } catch (err) {
-    console.error('Direct fetch error:', err);
-    return null;
-  }
-}
-
-// ─── Firecrawl HTML fetch (returns raw HTML, not markdown) ───
-
-async function fetchWithFirecrawlHtml(apiKey: string, url: string): Promise<string | null> {
-  if (!apiKey) return null;
-  try {
-    console.log('Trying Firecrawl for Isracard HTML...');
-    const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url,
-        formats: ['rawHtml'],
-        waitFor: 4000,
-        location: { country: 'IL', languages: ['he'] },
-      }),
-    });
-    if (!res.ok) { console.error(`Firecrawl HTML error: ${res.status}`); return null; }
-    const data = await res.json();
-    const html: string = data.data?.rawHtml || data.rawHtml || '';
-    if (html.includes('window.epi')) return html;
-    console.log('Firecrawl returned HTML but window.epi not found');
-    return null;
-  } catch (err) {
-    console.error('Firecrawl HTML error:', err);
-    return null;
-  }
-}
-
-// ─── Isracard: extract window.epi JSON from HTML ───
-
-function extractIsracardBenefits(html: string, membership: any): any[] {
-  try {
-    // Find window.epi = { ... } in the script tag
-    const startIdx = html.indexOf('window.epi = ');
-    if (startIdx < 0) {
-      console.error('window.epi not found in HTML');
-      return [];
-    }
-    const jsonStart = html.indexOf('{', startIdx);
-    // Walk forward counting braces to find the matching closing brace
-    let depth = 0;
-    let i = jsonStart;
-    while (i < html.length) {
-      const ch = html[i];
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) break; }
-      i++;
-    }
-    const jsonStr = html.substring(jsonStart, i + 1);
-    const epi = JSON.parse(jsonStr);
-    const benefits: any[] = epi?.CurrentPage?.Benefits || [];
-    console.log(`window.epi has ${benefits.length} benefits`);
-
-    const CATEGORY_MAP: Record<string, string> = {
-      'מומלצות': 'כללי',
-      'נוסעים לחו"ל': 'תיירות',
-      'הטבות אונליין': 'כללי',
-      'כרטיס Top': 'כללי',
-      'אטרקציות': 'בידור',
-      'קולנוע': 'בידור',
-      'הורים וילדים': 'כללי',
-      'בילוי ופנאי': 'בידור',
-      'הטבות נתב"ג': 'תיירות',
-    };
-
-    return benefits
-      .filter((b: any) => !b.OutOfStock && b.MobileBenefitName)
-      .map((b: any) => {
-        const name: string = b.MobileBenefitName || '';
-        const brand: string = b.MobileDescription || b.TitlePart1 || name.split(' ').slice(-1)[0];
-        const discountValue = extractDiscountFromName(name);
-        const israCategory = b.Category?.Name || '';
-        const category = CATEGORY_MAP[israCategory] || 'כללי';
-        const link: string = b.LinkUrl || '';
-        const redeemUrl = link.startsWith('http')
-          ? link
-          : link ? `https://benefits.isracard.co.il${link}` : 'https://benefits.isracard.co.il/';
-        // Strip HTML from description
-        const desc = (b.BenefitPageDescText || '')
-          .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 300) || null;
-        return { brand, title: name, description: desc, discount_value: discountValue, category, redeem_url: redeemUrl };
-      });
-  } catch (err) {
-    console.error('extractIsracardBenefits error:', err);
-    return [];
-  }
-}
-
-function extractDiscountFromName(name: string): string {
-  const pct = name.match(/(\d+)\s*%/);
-  if (pct) return `${pct[1]}%`;
-  const shekel = name.match(/(\d+)\s*₪/);
-  if (shekel) return `${shekel[1]}₪`;
-  const dollar = name.match(/(\d+)\s*\$/);
-  if (dollar) return `${dollar[1]}$`;
-  const plus = name.match(/(\d)\+(\d)/);
-  if (plus) return `${plus[1]}+${plus[2]}`;
-  if (/חינם/.test(name)) return 'חינם';
-  return name.substring(0, 25);
 }
 
 // ─── AI Parsing ───
