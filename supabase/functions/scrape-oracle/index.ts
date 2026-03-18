@@ -60,7 +60,8 @@ Deno.serve(async (req) => {
       const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
       if (firecrawlKey) {
         const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
-        const markdown = await fetchWithFirecrawl(firecrawlKey, israUrl);
+        // 12 seconds wait + full page (not just main content) for this heavy React SPA
+        const markdown = await fetchWithFirecrawl(firecrawlKey, israUrl, 12000, false);
         if (markdown && markdown.length > 300) {
           console.log(`Firecrawl returned ${markdown.length} chars for Isracard`);
           const discounts = await parseHtmlWithAI(lovableApiKey, markdown, membership);
@@ -222,8 +223,9 @@ async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promis
 
 // ─── Firecrawl fallback ───
 
-async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string | null> {
+async function fetchWithFirecrawl(apiKey: string, url: string, waitForMs = 5000, onlyMainContent = true): Promise<string | null> {
   try {
+    console.log(`Firecrawl scraping ${url} (waitFor: ${waitForMs}ms)`);
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
@@ -233,19 +235,22 @@ async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string |
       body: JSON.stringify({
         url,
         formats: ['markdown'],
-        onlyMainContent: true,
-        waitFor: 5000,
+        onlyMainContent,
+        waitFor: waitForMs,
         location: { country: 'IL', languages: ['he'] },
       }),
     });
 
     if (!response.ok) {
-      console.error(`Firecrawl error [${response.status}]`);
+      const errText = await response.text();
+      console.error(`Firecrawl error [${response.status}]: ${errText.substring(0, 300)}`);
       return null;
     }
 
     const data = await response.json();
-    return data.data?.markdown || data.markdown || null;
+    const markdown = data.data?.markdown || data.markdown || null;
+    if (markdown) console.log(`Firecrawl returned ${markdown.length} chars`);
+    return markdown;
   } catch (err) {
     console.error('Firecrawl error:', err);
     return null;
