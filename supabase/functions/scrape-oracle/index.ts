@@ -54,7 +54,10 @@ Deno.serve(async (req) => {
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
       console.log('Isracard detected — using window.epi direct extraction');
-      const israHtml = await fetchWithWebScrapingAI(webscrapingKey, 'https://benefits.isracard.co.il/');
+      // Try direct fetch first (no proxy needed, site is public)
+      // then Firecrawl as fallback. WebScraping.ai gets 403 from this site.
+      const israHtml = await fetchIsracardDirect() ||
+        await fetchWithFirecrawlHtml(Deno.env.get('FIRECRAWL_API_KEY') || '', 'https://benefits.isracard.co.il/');
       if (israHtml) {
         const discounts = extractIsracardBenefits(israHtml, membership);
         console.log(`Extracted ${discounts.length} Isracard discounts`);
@@ -239,6 +242,59 @@ async function fetchWithFirecrawl(apiKey: string, url: string): Promise<string |
     return data.data?.markdown || data.markdown || null;
   } catch (err) {
     console.error('Firecrawl error:', err);
+    return null;
+  }
+}
+
+// ─── Isracard: direct fetch (no proxy, site is publicly accessible) ───
+
+async function fetchIsracardDirect(): Promise<string | null> {
+  try {
+    console.log('Trying direct fetch for Isracard...');
+    const res = await fetch('https://benefits.isracard.co.il/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8',
+      },
+    });
+    console.log(`Direct fetch status: ${res.status}`);
+    if (res.ok) {
+      const html = await res.text();
+      if (html.includes('window.epi')) return html;
+      console.log('Direct fetch OK but window.epi not found (SSR not included)');
+    }
+    return null;
+  } catch (err) {
+    console.error('Direct fetch error:', err);
+    return null;
+  }
+}
+
+// ─── Firecrawl HTML fetch (returns raw HTML, not markdown) ───
+
+async function fetchWithFirecrawlHtml(apiKey: string, url: string): Promise<string | null> {
+  if (!apiKey) return null;
+  try {
+    console.log('Trying Firecrawl for Isracard HTML...');
+    const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        formats: ['rawHtml'],
+        waitFor: 4000,
+        location: { country: 'IL', languages: ['he'] },
+      }),
+    });
+    if (!res.ok) { console.error(`Firecrawl HTML error: ${res.status}`); return null; }
+    const data = await res.json();
+    const html: string = data.data?.rawHtml || data.rawHtml || '';
+    if (html.includes('window.epi')) return html;
+    console.log('Firecrawl returned HTML but window.epi not found');
+    return null;
+  } catch (err) {
+    console.error('Firecrawl HTML error:', err);
     return null;
   }
 }
