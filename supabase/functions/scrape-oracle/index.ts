@@ -50,55 +50,103 @@ Deno.serve(async (req) => {
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // ─── Isracard: Firecrawl JS rendering + AI parsing ───
-    // The site is a React SPA — window.epi doesn't exist in static HTML.
-    // We use Firecrawl (real browser, JS rendering) to get rendered content,
-    // then AI to extract the discounts.
+    // ─── Isracard: Browserless on Israeli-IP VM + AI parsing ───
+    // benefits.isracard.co.il is a React SPA that geo-blocks non-Israeli IPs.
+    // We use the Browserless Docker container running on our Google Cloud VM
+    // (zone me-west1-a = Israel) which has a real Israeli IP.
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
-      console.log('Isracard detected — using Firecrawl JS rendering');
-      const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
-      if (firecrawlKey) {
-        const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
-        // 12 seconds wait + full page (not just main content) for this heavy React SPA
-        const markdown = await fetchWithFirecrawl(firecrawlKey, israUrl, 12000, false);
-        if (markdown && markdown.length > 300) {
-          console.log(`Firecrawl returned ${markdown.length} chars for Isracard`);
-          const discounts = await parseHtmlWithAI(geminiKey, markdown, membership);
-          console.log(`AI extracted ${discounts.length} Isracard discounts`);
-          if (discounts.length > 0) {
-            await supabase.from('discounts').update({ is_active: false })
-              .eq('membership_id', membership.id).not('scraped_at', 'is', null);
-            const { error: insertError } = await supabase.from('discounts').insert(
-              discounts.map((d: any) => ({
-                brand: d.brand || 'ישראכרט',
-                title: d.title || '',
-                description: d.description || null,
-                discount_value: d.discount_value || '',
-                category: d.category || 'כללי',
-                location: d.location || 'כל הארץ',
-                redeem_url: d.redeem_url || israUrl,
-                membership_id: membership.id,
-                scraped_at: new Date().toISOString(),
-                is_active: true,
-              }))
-            );
-            if (insertError) {
-              console.error('Insert error:', insertError);
+      const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
+      // BROWSERLESS_URL secret is ws://34.165.116.90:80 — convert to http for REST API
+      const rawBrowserlessUrl = Deno.env.get('BROWSERLESS_URL') || 'http://34.165.116.90';
+      const browserlessBase = rawBrowserlessUrl.replace(/^ws:\/\//, 'http://').replace(/\/$/, '');
+      console.log(`Isracard detected — using Browserless at ${browserlessBase} (Israeli IP)`);
+
+      try {
+        // Use /function endpoint: runs real Chromium on the VM, fetches from Israeli IP
+        const fnRes = await fetch(`${browserlessBase}/function`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: `
+              module.exports = async ({ page }) => {
+                await page.goto('https://benefits.isracard.co.il/parentcategories/online-benefits/', {
+                  waitUntil: 'networkidle2',
+                  timeout: 30000
+                });
+                // Wait for React SPA to render discounts
+                await page.waitForTimeout(6000);
+                // Scroll down to trigger lazy loading
+                await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+                await page.waitForTimeout(2000);
+                // Extract visible text content
+                const text = await page.evaluate(() => document.body.innerText);
+                const html = await page.evaluate(() => document.documentElement.outerHTML);
+                return { text, htmlLength: html.length };
+              };
+            `,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+
+        if (fnRes.ok) {
+          const result = await fnRes.json();
+          const content = result?.text || '';
+          console.log(`Browserless returned ${content.length} chars (HTML was ${result?.htmlLength} chars) for Isracard`);
+
+          if (content.length > 500) {
+            const discounts = await parseHtmlWithAI(geminiKey, content, membership);
+            console.log(`AI extracted ${discounts.length} Isracard discounts`);
+
+            if (discounts.length > 0) {
+              await supabase.from('discounts').update({ is_active: false })
+                .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+              const { error: insertError } = await supabase.from('discounts').insert(
+                discounts.map((d: any) => ({
+                  brand: d.brand || 'ישראכרט',
+                  title: d.title || '',
+                  description: d.description || null,
+                  discount_value: d.discount_value || '',
+                  category: d.category || 'כללי',
+                  location: d.location || 'כל הארץ',
+                  redeem_url: d.redeem_url || israUrl,
+                  membership_id: membership.id,
+                  scraped_at: new Date().toISOString(),
+                  is_active: true,
+                }))
+              );
+              if (insertError) {
+                console.error('Insert error:', insertError);
+                return new Response(
+                  JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
+                  { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
+              }
               return new Response(
-                JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
-                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'browserless-israeli-ip+ai' }),
+                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
+            // Browserless worked but AI found 0 discounts
             return new Response(
-              JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'firecrawl+ai' }),
+              JSON.stringify({ success: false, error: 'Browserless got content but AI extracted 0 discounts', contentLength: content.length }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
+          // Browserless returned too little content
+          console.error(`Browserless content too short: ${content.length} chars — still geo-blocked?`);
+        } else {
+          const errText = await fnRes.text();
+          console.error(`Browserless /function error [${fnRes.status}]: ${errText.substring(0, 300)}`);
         }
-      } else {
-        console.log('FIRECRAWL_API_KEY not set — falling back to generic scraper');
+      } catch (e) {
+        console.error('Browserless error:', e);
       }
+
+      return new Response(
+        JSON.stringify({ success: false, error: 'Isracard scraping failed — check Browserless Docker status on VM' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Try WebScraping.ai first, then Firecrawl as fallback
