@@ -117,14 +117,17 @@ Deno.serve(async (req) => {
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
-            // Debug: show cleaned HTML preview so we can see what Gemini received
+            // Debug: show cleaned HTML from multiple positions
+            const mid = Math.floor(cleaned.length / 2);
             return new Response(
               JSON.stringify({
                 success: false,
                 error: 'AI extracted 0 discounts',
                 rawHtmlLength: html.length,
                 cleanedLength: cleaned.length,
-                cleanedPreview: cleaned.substring(0, 2000),
+                cleanedStart: cleaned.substring(0, 500),
+                cleanedMiddle: cleaned.substring(mid, mid + 1500),
+                cleanedEnd: cleaned.substring(cleaned.length - 1000),
               }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
@@ -328,20 +331,21 @@ async function parseHtmlWithAI(geminiKey: string, html: string, membership: any)
   console.log(`HTML cleaned: ${html.length} → ${cleaned.length} chars`);
   const truncatedHtml = cleaned.length > 120000 ? cleaned.substring(0, 120000) : cleaned;
 
-  const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
-חלץ את כל ההנחות הצרכניות שאתה מוצא (מותגים, חנויות, מסעדות, קולנוע, חופשות).
-אל תכלול מענקים ממשלתיים, תגמולים, סיוע כלכלי או זכאויות.
+  const prompt = `אתה מנתח תוכן HTML של דף הטבות ומבצעים מאתר "${membership.name}".
+חלץ את כל ההטבות, המבצעים וההנחות שאתה מוצא — כולל חנויות, מסעדות, קולנוע, אטרקציות, נסיעות, אופנה, אלקטרוניקה, בריאות.
+כל פריט שמוצג עם מותג + תיאור + ערך הנחה הוא הטבה.
+גם אם אין אחוז ספציפי — אם יש מוצר/שירות עם הטבה כלשהי, כלול אותו.
 
-לכל הנחה:
+לכל הטבה החזר:
 - brand: שם המותג/בית העסק (בעברית)
-- title: כותרת ההנחה (קצרה וברורה)
+- title: כותרת ההטבה
 - description: תיאור קצר
-- discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה")
+- discount_value: ערך ההנחה (לדוגמה: "20%", "1+1", "50₪ הנחה", "הטבה מיוחדת")
 - category: קטגוריה (אופנה, מזון, בריאות, בידור, חשמל, ספורט, תיירות, רכב, ביטוח, פיננסי, לימודים, כללי)
 - location: מיקום אם מצוין (או "כל הארץ")
-- redeem_url: קישור למימוש ההטבה אם מופיע
+- redeem_url: קישור למימוש אם קיים (או "")
 
-החזר רק JSON array תקני, ללא טקסט נוסף. אם אין הנחות, החזר [].`;
+החזר JSON array בלבד, ללא טקסט נוסף לפני או אחרי. אם אין הטבות, החזר [].`;
 
   try {
     const response = await fetch(
