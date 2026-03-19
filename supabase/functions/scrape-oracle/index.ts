@@ -296,10 +296,26 @@ async function fetchWithFirecrawl(apiKey: string, url: string, waitForMs = 5000,
   }
 }
 
+// ─── HTML Cleaner — strips scripts/styles/head to expose actual content ───
+
+function cleanHtml(html: string): string {
+  return html
+    .replace(/<head[\s\S]*?<\/head>/gi, '')       // Remove <head> entirely
+    .replace(/<script[\s\S]*?<\/script>/gi, '')   // Remove all <script> blocks
+    .replace(/<style[\s\S]*?<\/style>/gi, '')     // Remove all <style> blocks
+    .replace(/<!--[\s\S]*?-->/g, '')              // Remove HTML comments
+    .replace(/<svg[\s\S]*?<\/svg>/gi, '')         // Remove SVG icons
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '') // Remove noscript blocks
+    .replace(/\s{2,}/g, ' ')                      // Collapse whitespace
+    .trim();
+}
+
 // ─── AI Parsing (Google Gemini — free tier) ───
 
 async function parseHtmlWithAI(geminiKey: string, html: string, membership: any): Promise<any[]> {
-  const truncatedHtml = html.length > 100000 ? html.substring(0, 100000) : html;
+  const cleaned = cleanHtml(html);
+  console.log(`HTML cleaned: ${html.length} → ${cleaned.length} chars`);
+  const truncatedHtml = cleaned.length > 120000 ? cleaned.substring(0, 120000) : cleaned;
 
   const prompt = `אתה מנתח תוכן של דף הטבות מאתר מועדון "${membership.name}".
 חלץ את כל ההנחות הצרכניות שאתה מוצא (מותגים, חנויות, מסעדות, קולנוע, חופשות).
