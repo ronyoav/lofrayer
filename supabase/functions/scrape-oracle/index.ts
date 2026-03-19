@@ -50,37 +50,35 @@ Deno.serve(async (req) => {
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
-    // ─── Isracard: Browserless on Israeli-IP VM + AI parsing ───
-    // benefits.isracard.co.il is a React SPA that geo-blocks non-Israeli IPs.
-    // We use the Browserless Docker container running on our Google Cloud VM
-    // (zone me-west1-a = Israel) which has a real Israeli IP.
+    // ─── Isracard: WebScraping.ai with residential Israeli IP + AI parsing ───
+    // benefits.isracard.co.il geo-blocks non-Israeli IPs AND has Cloudflare protection.
+    // WebScraping.ai routes through residential Israeli IPs which bypass both.
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
       const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
-      // BROWSERLESS_URL secret is ws://34.165.116.90:80 — convert to http for REST API
-      const rawBrowserlessUrl = Deno.env.get('BROWSERLESS_URL') || 'http://34.165.116.90';
-      const browserlessBase = rawBrowserlessUrl.replace(/^ws:\/\//, 'http://').replace(/\/$/, '');
-      console.log(`Isracard detected — using Browserless at ${browserlessBase} (Israeli IP)`);
+      console.log('Isracard detected — using WebScraping.ai with residential Israeli IP');
 
       try {
-        // Use /content endpoint: runs real Chromium on the VM (Israeli IP), waits for SPA render
-        console.log('Calling Browserless /content endpoint...');
-        const contentRes = await fetch(`${browserlessBase}/content`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: israUrl,
-            waitFor: 8000,
-            stealth: true,
-            gotoOptions: { waitUntil: 'networkidle2', timeout: 30000 },
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          }),
-          signal: AbortSignal.timeout(50000),
+        const params = new URLSearchParams({
+          api_key: webscrapingKey,
+          url: israUrl,
+          country: 'il',
+          render_js: '1',
+          proxy: 'residential',
+          timeout: '45000',
+          wait: '8000',
         });
 
-        if (contentRes.ok) {
-          const html = await contentRes.text();
-          console.log(`Browserless /content returned ${html.length} chars for Isracard`);
+        console.log('Calling WebScraping.ai /html for Isracard...');
+        const wsRes = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
+          signal: AbortSignal.timeout(55000),
+        });
+
+        console.log(`WebScraping.ai status: ${wsRes.status}`);
+
+        if (wsRes.ok) {
+          const html = await wsRes.text();
+          console.log(`WebScraping.ai returned ${html.length} chars for Isracard`);
 
           if (html.length > 1000) {
             const discounts = await parseHtmlWithAI(geminiKey, html, membership);
@@ -111,33 +109,32 @@ Deno.serve(async (req) => {
                 );
               }
               return new Response(
-                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'browserless-content+ai' }),
+                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-residential-il+ai' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
             return new Response(
-              JSON.stringify({ success: false, error: 'Browserless got HTML but AI extracted 0 discounts', htmlLength: html.length, htmlPreview: html.substring(0, 500) }),
+              JSON.stringify({ success: false, error: 'WebScraping.ai got HTML but AI extracted 0 discounts', htmlLength: html.length, htmlPreview: html.substring(0, 500) }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
-          console.error(`Browserless HTML too short: ${html.length} chars`);
           return new Response(
-            JSON.stringify({ success: false, error: 'Browserless HTML too short — still geo-blocked?', htmlLength: html.length, htmlPreview: html.substring(0, 300) }),
+            JSON.stringify({ success: false, error: 'WebScraping.ai HTML too short — Cloudflare still blocking?', htmlLength: html.length, htmlPreview: html.substring(0, 300) }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         } else {
-          const errText = await contentRes.text();
-          console.error(`Browserless /content error [${contentRes.status}]: ${errText.substring(0, 300)}`);
+          const errText = await wsRes.text();
+          console.error(`WebScraping.ai error [${wsRes.status}]: ${errText.substring(0, 300)}`);
           return new Response(
-            JSON.stringify({ success: false, error: `Browserless /content HTTP ${contentRes.status}`, details: errText.substring(0, 300) }),
+            JSON.stringify({ success: false, error: `WebScraping.ai HTTP ${wsRes.status}`, details: errText.substring(0, 300) }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.error('Browserless error:', errMsg);
+        console.error('WebScraping.ai error:', errMsg);
         return new Response(
-          JSON.stringify({ success: false, error: `Browserless exception: ${errMsg}`, browserlessUrl: browserlessBase }),
+          JSON.stringify({ success: false, error: `WebScraping.ai exception: ${errMsg}` }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
