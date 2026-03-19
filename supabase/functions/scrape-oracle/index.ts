@@ -69,21 +69,23 @@ Deno.serve(async (req) => {
           wait: '8000',
         });
 
-        // Use /text endpoint — returns only visible rendered text, no HTML noise
-        console.log('Calling WebScraping.ai /text for Isracard...');
-        const wsRes = await fetch(`https://api.webscraping.ai/text?${params.toString()}`, {
+        // Use /html endpoint — /text times out on React SPAs
+        console.log('Calling WebScraping.ai /html for Isracard...');
+        const wsRes = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
           signal: AbortSignal.timeout(55000),
         });
 
         console.log(`WebScraping.ai status: ${wsRes.status}`);
 
         if (wsRes.ok) {
-          const pageText = await wsRes.text();
-          console.log(`WebScraping.ai /text returned ${pageText.length} chars for Isracard`);
-          console.log(`Text preview: ${pageText.substring(0, 300)}`);
+          const html = await wsRes.text();
+          console.log(`WebScraping.ai /html returned ${html.length} chars for Isracard`);
 
-          if (pageText.length > 500) {
-            const discounts = await parseHtmlWithAI(geminiKey, pageText, membership);
+          if (html.length > 1000) {
+            const cleaned = cleanHtml(html);
+            console.log(`Cleaned HTML: ${html.length} → ${cleaned.length} chars`);
+
+            const discounts = await parseHtmlWithAI(geminiKey, html, membership);
             console.log(`AI extracted ${discounts.length} Isracard discounts`);
 
             if (discounts.length > 0) {
@@ -111,19 +113,24 @@ Deno.serve(async (req) => {
                 );
               }
               return new Response(
-                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-text-residential-il+ai' }),
+                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-html-residential-il+ai' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
-            // Debug: show what Gemini actually received
-            const truncated = pageText.length > 120000 ? pageText.substring(0, 120000) : pageText;
+            // Debug: show cleaned HTML preview so we can see what Gemini received
             return new Response(
-              JSON.stringify({ success: false, error: 'AI extracted 0 discounts from text', textLength: pageText.length, textPreview: pageText.substring(0, 1000) }),
+              JSON.stringify({
+                success: false,
+                error: 'AI extracted 0 discounts',
+                rawHtmlLength: html.length,
+                cleanedLength: cleaned.length,
+                cleanedPreview: cleaned.substring(0, 2000),
+              }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
           return new Response(
-            JSON.stringify({ success: false, error: 'WebScraping.ai text too short — page not fully rendered?', textLength: pageText.length, textPreview: pageText.substring(0, 300) }),
+            JSON.stringify({ success: false, error: 'HTML too short — Cloudflare still blocking?', htmlLength: html.length, htmlPreview: html.substring(0, 300) }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         } else {
