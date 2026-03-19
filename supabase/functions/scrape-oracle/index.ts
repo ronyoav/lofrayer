@@ -63,39 +63,25 @@ Deno.serve(async (req) => {
       console.log(`Isracard detected — using Browserless at ${browserlessBase} (Israeli IP)`);
 
       try {
-        // Use /function endpoint: runs real Chromium on the VM, fetches from Israeli IP
-        const fnRes = await fetch(`${browserlessBase}/function`, {
+        // Use /content endpoint: runs real Chromium on the VM (Israeli IP), waits for SPA render
+        console.log('Calling Browserless /content endpoint...');
+        const contentRes = await fetch(`${browserlessBase}/content`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            code: `
-              module.exports = async ({ page }) => {
-                await page.goto('https://benefits.isracard.co.il/parentcategories/online-benefits/', {
-                  waitUntil: 'networkidle2',
-                  timeout: 30000
-                });
-                // Wait for React SPA to render discounts
-                await page.waitForTimeout(6000);
-                // Scroll down to trigger lazy loading
-                await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-                await page.waitForTimeout(2000);
-                // Extract visible text content
-                const text = await page.evaluate(() => document.body.innerText);
-                const html = await page.evaluate(() => document.documentElement.outerHTML);
-                return { text, htmlLength: html.length };
-              };
-            `,
+            url: israUrl,
+            waitFor: 8000,
+            gotoOptions: { waitUntil: 'networkidle2', timeout: 30000 },
           }),
-          signal: AbortSignal.timeout(45000),
+          signal: AbortSignal.timeout(50000),
         });
 
-        if (fnRes.ok) {
-          const result = await fnRes.json();
-          const content = result?.text || '';
-          console.log(`Browserless returned ${content.length} chars (HTML was ${result?.htmlLength} chars) for Isracard`);
+        if (contentRes.ok) {
+          const html = await contentRes.text();
+          console.log(`Browserless /content returned ${html.length} chars for Isracard`);
 
-          if (content.length > 500) {
-            const discounts = await parseHtmlWithAI(geminiKey, content, membership);
+          if (html.length > 1000) {
+            const discounts = await parseHtmlWithAI(geminiKey, html, membership);
             console.log(`AI extracted ${discounts.length} Isracard discounts`);
 
             if (discounts.length > 0) {
@@ -123,21 +109,27 @@ Deno.serve(async (req) => {
                 );
               }
               return new Response(
-                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'browserless-israeli-ip+ai' }),
+                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'browserless-content+ai' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
-            // Browserless worked but AI found 0 discounts
             return new Response(
-              JSON.stringify({ success: false, error: 'Browserless got content but AI extracted 0 discounts', contentLength: content.length }),
+              JSON.stringify({ success: false, error: 'Browserless got HTML but AI extracted 0 discounts', htmlLength: html.length, htmlPreview: html.substring(0, 500) }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
-          // Browserless returned too little content
-          console.error(`Browserless content too short: ${content.length} chars — still geo-blocked?`);
+          console.error(`Browserless HTML too short: ${html.length} chars`);
+          return new Response(
+            JSON.stringify({ success: false, error: 'Browserless HTML too short — still geo-blocked?', htmlLength: html.length, htmlPreview: html.substring(0, 300) }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
         } else {
-          const errText = await fnRes.text();
-          console.error(`Browserless /function error [${fnRes.status}]: ${errText.substring(0, 300)}`);
+          const errText = await contentRes.text();
+          console.error(`Browserless /content error [${contentRes.status}]: ${errText.substring(0, 300)}`);
+          return new Response(
+            JSON.stringify({ success: false, error: `Browserless /content HTTP ${contentRes.status}`, details: errText.substring(0, 300) }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -147,11 +139,6 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-
-      return new Response(
-        JSON.stringify({ success: false, error: 'Isracard scraping failed — Browserless returned no usable content', browserlessUrl: browserlessBase }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
     }
 
     // Try WebScraping.ai first, then Firecrawl as fallback
