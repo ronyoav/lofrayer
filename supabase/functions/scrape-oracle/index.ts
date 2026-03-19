@@ -71,7 +71,9 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             url: israUrl,
             waitFor: 8000,
+            stealth: true,
             gotoOptions: { waitUntil: 'networkidle2', timeout: 30000 },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
           }),
           signal: AbortSignal.timeout(50000),
         });
