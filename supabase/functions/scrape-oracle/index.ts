@@ -140,11 +140,16 @@ Deno.serve(async (req) => {
           console.error(`Browserless /function error [${fnRes.status}]: ${errText.substring(0, 300)}`);
         }
       } catch (e) {
-        console.error('Browserless error:', e);
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('Browserless error:', errMsg);
+        return new Response(
+          JSON.stringify({ success: false, error: `Browserless exception: ${errMsg}`, browserlessUrl: browserlessBase }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
 
       return new Response(
-        JSON.stringify({ success: false, error: 'Isracard scraping failed — check Browserless Docker status on VM' }),
+        JSON.stringify({ success: false, error: 'Isracard scraping failed — Browserless returned no usable content', browserlessUrl: browserlessBase }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
