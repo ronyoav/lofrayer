@@ -184,14 +184,28 @@ Deno.serve(async (req) => {
 
         for (const calUrl of calUrls) {
           console.log(`Scraping CAL page: ${calUrl}`);
-          const pageHtml = await fetchWithWebScrapingAI(webscrapingKey, calUrl);
 
-          if (!pageHtml) {
-            console.error(`Failed to fetch CAL page: ${calUrl}`);
-            calPageResults.push({ url: calUrl, status: 'fetch-failed', htmlLength: 0, discounts: 0 });
+          // Must use wait:5000 — cal-store.co.il is a JS SPA, products load asynchronously
+          const calParams = new URLSearchParams({
+            api_key: webscrapingKey,
+            url: calUrl,
+            country: 'il',
+            render_js: '1',
+            proxy: 'residential',
+            timeout: '45000',
+            wait: '5000',
+          });
+          const calRes = await fetch(`https://api.webscraping.ai/html?${calParams.toString()}`, {
+            signal: AbortSignal.timeout(55000),
+          });
+
+          if (!calRes.ok) {
+            console.error(`Failed to fetch CAL page: ${calUrl} — HTTP ${calRes.status}`);
+            calPageResults.push({ url: calUrl, status: `http-${calRes.status}`, htmlLength: 0, discounts: 0 });
             continue;
           }
 
+          const pageHtml = await calRes.text();
           console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
           const pageDiscounts = await parseHtmlWithAI(geminiKey, pageHtml, membership);
           console.log(`AI extracted ${pageDiscounts.length} discounts from ${calUrl}`);
