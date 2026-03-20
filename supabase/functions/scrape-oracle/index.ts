@@ -165,16 +165,15 @@ Deno.serve(async (req) => {
     }
 
     // ─── CAL: multiple product-list pages ───
-    const isCal = membership.scrape_url?.includes('cal-store.co.il');
+    const isCal = membership.slug === 'cal' || membership.scrape_url?.includes('cal-store.co.il');
     if (isCal) {
       const calUrls = [
-        membership.scrape_url, // keep the original page from DB
         'https://www.cal-store.co.il/productlist.php?cid=B0E087D2-212B-4308-813D-C8693B2563F7',
         'https://www.cal-store.co.il/productlist.php?cid=11FAA02A-199E-4789-B826-4AD4FF5A8994',
         'https://www.cal-store.co.il/productlist.php?cid=6BA2A2E1-768B-47A5-A43C-97B745E0B8F6',
         'https://www.cal-store.co.il/productlist.php?cid=97025B5D-4A33-49E6-9ED1-5B6571454A4E',
         'https://www.cal-store.co.il/productlist.php?cid=1A680972-97C4-4B2F-9950-37EC7297DA73',
-      ].filter((u, i, arr) => u && arr.indexOf(u) === i); // dedupe in case scrape_url is already one of these
+      ];
 
       console.log(`CAL detected — scraping ${calUrls.length} pages`);
 
