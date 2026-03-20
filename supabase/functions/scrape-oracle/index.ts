@@ -164,6 +164,90 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── CAL: multiple product-list pages ───
+    const isCal = membership.scrape_url?.includes('cal-store.co.il');
+    if (isCal) {
+      const calUrls = [
+        membership.scrape_url, // keep the original page from DB
+        'https://www.cal-store.co.il/productlist.php?cid=B0E087D2-212B-4308-813D-C8693B2563F7',
+        'https://www.cal-store.co.il/productlist.php?cid=11FAA02A-199E-4789-B826-4AD4FF5A8994',
+        'https://www.cal-store.co.il/productlist.php?cid=6BA2A2E1-768B-47A5-A43C-97B745E0B8F6',
+        'https://www.cal-store.co.il/productlist.php?cid=97025B5D-4A33-49E6-9ED1-5B6571454A4E',
+        'https://www.cal-store.co.il/productlist.php?cid=1A680972-97C4-4B2F-9950-37EC7297DA73',
+      ].filter((u, i, arr) => u && arr.indexOf(u) === i); // dedupe in case scrape_url is already one of these
+
+      console.log(`CAL detected — scraping ${calUrls.length} pages`);
+
+      try {
+        const allDiscounts: any[] = [];
+        const seenTitles = new Set<string>();
+
+        for (const calUrl of calUrls) {
+          console.log(`Scraping CAL page: ${calUrl}`);
+          const pageHtml = await fetchWithWebScrapingAI(webscrapingKey, calUrl);
+
+          if (!pageHtml) {
+            console.error(`Failed to fetch CAL page: ${calUrl}`);
+            continue;
+          }
+
+          console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
+          const pageDiscounts = await parseHtmlWithAI(geminiKey, pageHtml, membership);
+          console.log(`AI extracted ${pageDiscounts.length} discounts from ${calUrl}`);
+
+          for (const d of pageDiscounts) {
+            if (!seenTitles.has(d.title)) {
+              seenTitles.add(d.title);
+              allDiscounts.push({ ...d, redeem_url: d.redeem_url || calUrl });
+            }
+          }
+        }
+
+        console.log(`Total CAL discounts across all pages: ${allDiscounts.length}`);
+
+        if (allDiscounts.length > 0) {
+          await supabase.from('discounts').update({ is_active: false })
+            .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+          const { error: insertError } = await supabase.from('discounts').insert(
+            allDiscounts.map((d: any) => ({
+              brand: d.brand || 'כאל',
+              title: d.title || '',
+              description: d.description || null,
+              discount_value: d.discount_value || '',
+              category: d.category || 'כללי',
+              location: d.location || 'כל הארץ',
+              redeem_url: d.redeem_url || membership.scrape_url,
+              membership_id: membership.id,
+              scraped_at: new Date().toISOString(),
+              is_active: true,
+            }))
+          );
+          if (insertError) {
+            console.error('Insert error:', insertError);
+            return new Response(
+              JSON.stringify({ success: false, error: insertError.message, discountsFound: allDiscounts.length }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          return new Response(
+            JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai+ai-multi-page', pages: calUrls.length }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: false, error: 'No discounts extracted from any CAL page' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('CAL scrape error:', errMsg);
+        return new Response(
+          JSON.stringify({ success: false, error: `CAL exception: ${errMsg}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // Try WebScraping.ai first, then Firecrawl as fallback
     let html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
     let strategy = 'webscraping.ai';
