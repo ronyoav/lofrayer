@@ -180,6 +180,7 @@ Deno.serve(async (req) => {
       try {
         const allDiscounts: any[] = [];
         const seenTitles = new Set<string>();
+        const calPageResults: any[] = [];
 
         for (const calUrl of calUrls) {
           console.log(`Scraping CAL page: ${calUrl}`);
@@ -187,12 +188,14 @@ Deno.serve(async (req) => {
 
           if (!pageHtml) {
             console.error(`Failed to fetch CAL page: ${calUrl}`);
+            calPageResults.push({ url: calUrl, status: 'fetch-failed', htmlLength: 0, discounts: 0 });
             continue;
           }
 
           console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
           const pageDiscounts = await parseHtmlWithAI(geminiKey, pageHtml, membership);
           console.log(`AI extracted ${pageDiscounts.length} discounts from ${calUrl}`);
+          calPageResults.push({ url: calUrl, status: 'ok', htmlLength: pageHtml.length, discounts: pageDiscounts.length, htmlPreview: pageHtml.substring(0, 300) });
 
           for (const d of pageDiscounts) {
             if (!seenTitles.has(d.title)) {
@@ -203,6 +206,13 @@ Deno.serve(async (req) => {
         }
 
         console.log(`Total CAL discounts across all pages: ${allDiscounts.length}`);
+
+        if (allDiscounts.length === 0) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'No discounts extracted from any CAL page', pageResults: calPageResults }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
 
         if (allDiscounts.length > 0) {
           await supabase.from('discounts').update({ is_active: false })
@@ -233,10 +243,6 @@ Deno.serve(async (req) => {
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-        return new Response(
-          JSON.stringify({ success: false, error: 'No discounts extracted from any CAL page' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
         console.error('CAL scrape error:', errMsg);
