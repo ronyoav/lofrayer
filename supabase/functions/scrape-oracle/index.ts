@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
           render_js: '1',
           proxy: 'residential',
           timeout: '45000',
-          wait: '8000',
+          wait: '5000',
         });
 
         // Use /html endpoint — /text times out on React SPAs
@@ -82,11 +82,18 @@ Deno.serve(async (req) => {
           console.log(`WebScraping.ai /html returned ${html.length} chars for Isracard`);
 
           if (html.length > 1000) {
-            const cleaned = cleanHtml(html);
-            console.log(`Cleaned HTML: ${html.length} → ${cleaned.length} chars`);
+            console.log(`Raw HTML: ${html.length} chars`);
 
-            const discounts = await parseHtmlWithAI(geminiKey, html, membership);
-            console.log(`AI extracted ${discounts.length} Isracard discounts`);
+            // Direct regex extraction — structure is known: caption-title + caption-sub-title + onclick href
+            let discounts = extractIsracardBenefits(html, israUrl);
+            console.log(`Direct extraction: ${discounts.length} Isracard discounts`);
+
+            // AI fallback if direct extraction gets nothing
+            if (discounts.length === 0) {
+              console.log('Direct extraction got 0, falling back to AI...');
+              discounts = await parseHtmlWithAI(geminiKey, html, membership);
+              console.log(`AI extracted ${discounts.length} Isracard discounts`);
+            }
 
             if (discounts.length > 0) {
               await supabase.from('discounts').update({ is_active: false })
@@ -113,22 +120,12 @@ Deno.serve(async (req) => {
                 );
               }
               return new Response(
-                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-html-residential-il+ai' }),
+                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-direct-extraction' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               );
             }
-            // Debug: show cleaned HTML from multiple positions
-            const mid = Math.floor(cleaned.length / 2);
             return new Response(
-              JSON.stringify({
-                success: false,
-                error: 'AI extracted 0 discounts',
-                rawHtmlLength: html.length,
-                cleanedLength: cleaned.length,
-                cleanedStart: cleaned.substring(0, 500),
-                cleanedMiddle: cleaned.substring(mid, mid + 1500),
-                cleanedEnd: cleaned.substring(cleaned.length - 1000),
-              }),
+              JSON.stringify({ success: false, error: 'No discounts extracted (direct + AI both returned 0)', htmlLength: html.length }),
               { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
@@ -322,6 +319,63 @@ function cleanHtml(html: string): string {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, '') // Remove noscript blocks
     .replace(/\s{2,}/g, ' ')                      // Collapse whitespace
     .trim();
+}
+
+// ─── Isracard direct extractor — parses known caption-title/sub-title structure ───
+
+function extractIsracardBenefits(html: string, baseUrl: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+
+  // Each benefit card is an <a> with class "category-item"
+  const blockRegex = /<a[^>]+class="[^"]*category-item[^"]*"[^>]*onclick="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let blockMatch: RegExpExecArray | null;
+
+  while ((blockMatch = blockRegex.exec(html)) !== null) {
+    const onclick = blockMatch[1];
+    const inner = blockMatch[2];
+
+    // Title: <div class="... caption-title ...">TEXT</div>
+    const titleMatch = inner.match(/class="[^"]*caption-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    // Brand: <div class="... caption-sub-title ...">TEXT</div>
+    const brandMatch = inner.match(/class="[^"]*caption-sub-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const brand = brandMatch ? brandMatch[1].replace(/<[^>]+>/g, '').trim() : title.split('-')[0].trim();
+
+    // Redeem URL: location.href='URL' in onclick
+    const urlMatch = onclick.match(/location\.href='([^']+)'/);
+    const redeemUrl = urlMatch ? urlMatch[1] : baseUrl;
+
+    // Category: first arg of benefitClick('CATEGORY', ...)
+    const catMatch = onclick.match(/benefitClick\('([^']+)'/);
+    let category = 'כללי';
+    if (catMatch) {
+      const raw = catMatch[1];
+      if (/אונליין/.test(raw)) category = 'קניות אונליין';
+      else if (/אוכל|מסעד/.test(raw)) category = 'מזון';
+      else if (/בריאות/.test(raw)) category = 'בריאות';
+      else if (/אופנה/.test(raw)) category = 'אופנה';
+      else if (/בידור/.test(raw)) category = 'בידור';
+      else if (/תיירות|נסיעות/.test(raw)) category = 'תיירות';
+      else if (/ספורט/.test(raw)) category = 'ספורט';
+    }
+
+    // Discount value: pick the most specific pattern found in the title
+    const discountPatterns = [/עד\s*\d+%/, /\d+%/, /\d+\s*₪/, /קאשבק/, /1\+1/];
+    let discountValue = 'הטבה';
+    for (const pat of discountPatterns) {
+      const dm = title.match(pat);
+      if (dm) { discountValue = dm[0]; break; }
+    }
+
+    discounts.push({ brand, title, description: null, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
+  }
+
+  return discounts;
 }
 
 // ─── AI Parsing (Google Gemini — free tier) ───
