@@ -55,97 +55,110 @@ Deno.serve(async (req) => {
     // WebScraping.ai routes through residential Israeli IPs which bypass both.
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
-      const israUrl = 'https://benefits.isracard.co.il/parentcategories/online-benefits/';
-      console.log('Isracard detected — using WebScraping.ai with residential Israeli IP');
+      const israUrls = [
+        'https://benefits.isracard.co.il/parentcategories/online-benefits/',
+        'https://benefits.isracard.co.il/parentcategories/cinema/',
+        'https://benefits.isracard.co.il/parentcategories/art/',
+        'https://benefits.isracard.co.il/parentcategories/parents/',
+        'https://benefits.isracard.co.il/parentcategories/attractions/',
+      ];
+      console.log('Isracard detected — scraping multiple pages with WebScraping.ai residential IL proxy');
 
       try {
-        const params = new URLSearchParams({
-          api_key: webscrapingKey,
-          url: israUrl,
-          country: 'il',
-          render_js: '1',
-          proxy: 'residential',
-          timeout: '45000',
-          wait: '5000',
-        });
+        const allDiscounts: any[] = [];
+        const seenTitles = new Set<string>();
 
-        // Use /html endpoint — /text times out on React SPAs
-        console.log('Calling WebScraping.ai /html for Isracard...');
-        const wsRes = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
-          signal: AbortSignal.timeout(55000),
-        });
+        for (const israUrl of israUrls) {
+          console.log(`Scraping Isracard page: ${israUrl}`);
+          const params = new URLSearchParams({
+            api_key: webscrapingKey,
+            url: israUrl,
+            country: 'il',
+            render_js: '1',
+            proxy: 'residential',
+            timeout: '45000',
+            wait: '5000',
+          });
 
-        console.log(`WebScraping.ai status: ${wsRes.status}`);
+          const wsRes = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
+            signal: AbortSignal.timeout(55000),
+          });
 
-        if (wsRes.ok) {
+          console.log(`WebScraping.ai status for ${israUrl}: ${wsRes.status}`);
+
+          if (!wsRes.ok) {
+            console.error(`Failed to fetch ${israUrl}: HTTP ${wsRes.status}`);
+            continue;
+          }
+
           const html = await wsRes.text();
-          console.log(`WebScraping.ai /html returned ${html.length} chars for Isracard`);
+          console.log(`Got ${html.length} chars from ${israUrl}`);
 
-          if (html.length > 1000) {
-            console.log(`Raw HTML: ${html.length} chars`);
+          if (html.length < 1000) {
+            console.error(`HTML too short for ${israUrl} — skipping`);
+            continue;
+          }
 
-            // Direct regex extraction — structure is known: caption-title + caption-sub-title + onclick href
-            let discounts = extractIsracardBenefits(html, israUrl);
-            console.log(`Direct extraction: ${discounts.length} Isracard discounts`);
+          // Direct regex extraction
+          let pageDiscounts = extractIsracardBenefits(html, israUrl);
+          console.log(`Direct extraction from ${israUrl}: ${pageDiscounts.length} discounts`);
 
-            // AI fallback if direct extraction gets nothing
-            if (discounts.length === 0) {
-              console.log('Direct extraction got 0, falling back to AI...');
-              discounts = await parseHtmlWithAI(geminiKey, html, membership);
-              console.log(`AI extracted ${discounts.length} Isracard discounts`);
+          // AI fallback
+          if (pageDiscounts.length === 0) {
+            console.log(`Direct got 0 for ${israUrl}, falling back to AI...`);
+            pageDiscounts = await parseHtmlWithAI(geminiKey, html, membership);
+            console.log(`AI extracted ${pageDiscounts.length} discounts from ${israUrl}`);
+          }
+
+          // Deduplicate across pages
+          for (const d of pageDiscounts) {
+            if (!seenTitles.has(d.title)) {
+              seenTitles.add(d.title);
+              allDiscounts.push(d);
             }
+          }
+        }
 
-            if (discounts.length > 0) {
-              await supabase.from('discounts').update({ is_active: false })
-                .eq('membership_id', membership.id).not('scraped_at', 'is', null);
-              const { error: insertError } = await supabase.from('discounts').insert(
-                discounts.map((d: any) => ({
-                  brand: d.brand || 'ישראכרט',
-                  title: d.title || '',
-                  description: d.description || null,
-                  discount_value: d.discount_value || '',
-                  category: d.category || 'כללי',
-                  location: d.location || 'כל הארץ',
-                  redeem_url: d.redeem_url || israUrl,
-                  membership_id: membership.id,
-                  scraped_at: new Date().toISOString(),
-                  is_active: true,
-                }))
-              );
-              if (insertError) {
-                console.error('Insert error:', insertError);
-                return new Response(
-                  JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
-                  { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-              }
-              return new Response(
-                JSON.stringify({ success: true, membership: membership.name, discountsFound: discounts.length, strategy: 'webscraping.ai-direct-extraction' }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-              );
-            }
+        console.log(`Total Isracard discounts across all pages: ${allDiscounts.length}`);
+
+        if (allDiscounts.length > 0) {
+          await supabase.from('discounts').update({ is_active: false })
+            .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+          const { error: insertError } = await supabase.from('discounts').insert(
+            allDiscounts.map((d: any) => ({
+              brand: d.brand || 'ישראכרט',
+              title: d.title || '',
+              description: d.description || null,
+              discount_value: d.discount_value || '',
+              category: d.category || 'כללי',
+              location: d.location || 'כל הארץ',
+              redeem_url: d.redeem_url || israUrls[0],
+              membership_id: membership.id,
+              scraped_at: new Date().toISOString(),
+              is_active: true,
+            }))
+          );
+          if (insertError) {
+            console.error('Insert error:', insertError);
             return new Response(
-              JSON.stringify({ success: false, error: 'No discounts extracted (direct + AI both returned 0)', htmlLength: html.length }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              JSON.stringify({ success: false, error: insertError.message, discountsFound: allDiscounts.length }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
           return new Response(
-            JSON.stringify({ success: false, error: 'HTML too short — Cloudflare still blocking?', htmlLength: html.length, htmlPreview: html.substring(0, 300) }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        } else {
-          const errText = await wsRes.text();
-          console.error(`WebScraping.ai error [${wsRes.status}]: ${errText.substring(0, 300)}`);
-          return new Response(
-            JSON.stringify({ success: false, error: `WebScraping.ai HTTP ${wsRes.status}`, details: errText.substring(0, 300) }),
+            JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai-direct-extraction', pages: israUrls.length }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
+        return new Response(
+          JSON.stringify({ success: false, error: 'No discounts extracted from any Isracard page' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.error('WebScraping.ai error:', errMsg);
+        console.error('Isracard scrape error:', errMsg);
         return new Response(
-          JSON.stringify({ success: false, error: `WebScraping.ai exception: ${errMsg}` }),
+          JSON.stringify({ success: false, error: `Isracard exception: ${errMsg}` }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
