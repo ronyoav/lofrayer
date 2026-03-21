@@ -182,22 +182,17 @@ Deno.serve(async (req) => {
         const seenTitles = new Set<string>();
         const calPageResults: any[] = [];
 
+        // VM proxy: Israeli IP bypasses MemCyco SDK that blocks WebScraping.ai
+        const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
+        const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+
         for (const calUrl of calUrls) {
           console.log(`Scraping CAL page: ${calUrl}`);
 
-          // render_js=0: products are server-rendered in raw HTML.
-          // The MemCyco/aphishi security SDK only runs client-side JS — skipping JS rendering
-          // avoids triggering it, so we receive the full SSR HTML (~66 products per page).
-          const calParams = new URLSearchParams({
-            api_key: webscrapingKey,
-            url: calUrl,
-            country: 'il',
-            render_js: '0',
-            proxy: 'residential',
-            timeout: '30000',
-          });
-          const calRes = await fetch(`https://api.webscraping.ai/html?${calParams.toString()}`, {
-            signal: AbortSignal.timeout(40000),
+          // Route through VM proxy (Israeli residential IP, bypasses MemCyco anti-bot SDK)
+          const proxyEndpoint = `${calProxyUrl}/?key=${calProxyKey}&url=${encodeURIComponent(calUrl)}`;
+          const calRes = await fetch(proxyEndpoint, {
+            signal: AbortSignal.timeout(30000),
           });
 
           if (!calRes.ok) {
