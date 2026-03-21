@@ -175,7 +175,7 @@ Deno.serve(async (req) => {
         'https://www.cal-store.co.il/productlist.php?cid=1A680972-97C4-4B2F-9950-37EC7297DA73',
       ];
 
-      console.log(`CAL detected — scraping ${calUrls.length} pages`);
+      console.log(`CAL detected — scraping ${calUrls.length} pages (render_js=0 to bypass MemCyco SDK)`);
 
       try {
         const allDiscounts: any[] = [];
@@ -185,18 +185,19 @@ Deno.serve(async (req) => {
         for (const calUrl of calUrls) {
           console.log(`Scraping CAL page: ${calUrl}`);
 
-          // Must use wait:5000 — cal-store.co.il is a JS SPA, products load asynchronously
+          // render_js=0: products are server-rendered in raw HTML.
+          // The MemCyco/aphishi security SDK only runs client-side JS — skipping JS rendering
+          // avoids triggering it, so we receive the full SSR HTML (~66 products per page).
           const calParams = new URLSearchParams({
             api_key: webscrapingKey,
             url: calUrl,
             country: 'il',
-            render_js: '1',
+            render_js: '0',
             proxy: 'residential',
-            timeout: '45000',
-            wait: '5000',
+            timeout: '30000',
           });
           const calRes = await fetch(`https://api.webscraping.ai/html?${calParams.toString()}`, {
-            signal: AbortSignal.timeout(55000),
+            signal: AbortSignal.timeout(40000),
           });
 
           if (!calRes.ok) {
@@ -207,8 +208,11 @@ Deno.serve(async (req) => {
 
           const pageHtml = await calRes.text();
           console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
-          const pageDiscounts = await parseHtmlWithAI(geminiKey, pageHtml, membership);
-          console.log(`AI extracted ${pageDiscounts.length} discounts from ${calUrl}`);
+
+          // Direct regex extraction — same approach as Isracard
+          let pageDiscounts = extractCalBenefits(pageHtml, calUrl);
+          console.log(`Direct extraction from ${calUrl}: ${pageDiscounts.length} discounts`);
+
           calPageResults.push({ url: calUrl, status: 'ok', htmlLength: pageHtml.length, discounts: pageDiscounts.length, htmlPreview: pageHtml.substring(0, 300) });
 
           for (const d of pageDiscounts) {
@@ -489,6 +493,80 @@ function extractIsracardBenefits(html: string, baseUrl: string): any[] {
     }
 
     discounts.push({ brand, title, description: null, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
+  }
+
+  return discounts;
+}
+
+// ─── CAL direct extractor — parses cal-store.co.il SSR product cards ───
+// Structure (server-rendered, no JS needed):
+//   <div class="categories__text">
+//     <a href="/product.php?pid=UUID&cid=UUID">
+//       <h3 class="font-weight-600">TITLE <span>החל מ-<span>₪</span>PRICE<span>במקום</span><span>₪ORIG</span></span></h3>
+//       <p class="d-table-row">DESCRIPTION</p>
+//     </a>
+//   </div>
+
+function extractCalBenefits(html: string, baseUrl: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+  const base = 'https://www.cal-store.co.il';
+
+  // Match each product text block (the info card, not the image card)
+  const blockRegex = /<div[^>]+class="[^"]*categories__text[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+  let blockMatch: RegExpExecArray | null;
+
+  while ((blockMatch = blockRegex.exec(html)) !== null) {
+    const inner = blockMatch[1];
+
+    // Product URL from <a href="/product.php?pid=...">
+    const hrefMatch = inner.match(/href="(\/product\.php\?[^"]+)"/i);
+    const redeemUrl = hrefMatch ? `${base}${hrefMatch[1]}` : baseUrl;
+
+    // Title: text content of <h3>, strip all child tags
+    const h3Match = inner.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+    if (!h3Match) continue;
+    const h3Inner = h3Match[1];
+
+    // Price span: "החל מ- ₪XXX במקום ₪YYY"
+    const priceSpanMatch = h3Inner.match(/<span[^>]*>([\s\S]*?)<\/span>/i);
+    const priceRaw = priceSpanMatch ? priceSpanMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+    // Title = h3 text without the price span
+    const titleRaw = h3Inner.replace(/<span[\s\S]*?<\/span>/gi, '').replace(/<[^>]+>/g, '').trim();
+    if (!titleRaw || seen.has(titleRaw)) continue;
+    seen.add(titleRaw);
+
+    // Description: <p class="d-table-row">TEXT</p>
+    const descMatch = inner.match(/<p[^>]+class="[^"]*d-table-row[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
+    const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : null;
+
+    // Discount value: parse "החל מ-₪XXX במקום ₪YYY" → "החל מ-₪XXX"
+    let discountValue = 'הטבה';
+    const priceClean = priceRaw.replace(/\s+/g, ' ').trim();
+    if (priceClean) {
+      // Try to extract "החל מ-₪NNN" part
+      const fromMatch = priceClean.match(/החל\s*מ[^₪]*₪\s*[\d,]+/);
+      if (fromMatch) discountValue = fromMatch[0].replace(/\s+/g, ' ').trim();
+      else discountValue = priceClean.substring(0, 40);
+    }
+
+    // Brand = first word(s) of the title (before first space or dash)
+    const brand = titleRaw.split(/[-–\s]/)[0].trim() || 'כאל';
+
+    // Category: infer from description/title keywords
+    let category = 'כללי';
+    const text = (titleRaw + ' ' + (description || '')).toLowerCase();
+    if (/מסעד|אוכל|קפה|פיצ|שוקו|סושי|המבורג/.test(text)) category = 'מזון';
+    else if (/קולנוע|סרט|תיאטרון|הצגה|בידור/.test(text)) category = 'בידור';
+    else if (/ספא|קוסמ|יופי|שיער|ניקוי|בריאות|כושר|ספורט/.test(text)) category = 'בריאות';
+    else if (/אופנה|ביגוד|נעל|תיק|תכשיט/.test(text)) category = 'אופנה';
+    else if (/נסיע|טיסה|מלון|תיירות|חופשה/.test(text)) category = 'תיירות';
+    else if (/אלקטרוני|מחשב|טלפון|חשמל/.test(text)) category = 'אלקטרוניקה';
+    else if (/ילד|משפח|גן|פארק|אטרקצ/.test(text)) category = 'פנאי ומשפחה';
+    else if (/תווי|קנייה|סל|מזון/.test(text)) category = 'מזון';
+
+    discounts.push({ brand, title: titleRaw, description, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
   }
 
   return discounts;
