@@ -33,6 +33,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
+    const testMode = body?.test === true; // ?test=true → scrape only 1 page (for debugging)
 
     const { data: membership, error: membershipError } = await supabase
       .from('memberships')
@@ -167,13 +168,16 @@ Deno.serve(async (req) => {
     // ─── CAL: multiple product-list pages ───
     const isCal = membership.slug === 'cal' || membership.scrape_url?.includes('cal-store.co.il');
     if (isCal) {
-      const calUrls = [
+      const allCalUrls = [
         'https://www.cal-store.co.il/productlist.php?cid=B0E087D2-212B-4308-813D-C8693B2563F7',
         'https://www.cal-store.co.il/productlist.php?cid=11FAA02A-199E-4789-B826-4AD4FF5A8994',
         'https://www.cal-store.co.il/productlist.php?cid=6BA2A2E1-768B-47A5-A43C-97B745E0B8F6',
         'https://www.cal-store.co.il/productlist.php?cid=97025B5D-4A33-49E6-9ED1-5B6571454A4E',
         'https://www.cal-store.co.il/productlist.php?cid=1A680972-97C4-4B2F-9950-37EC7297DA73',
       ];
+      // In test mode, only scrape 1 page to verify the pipeline works
+      const calUrls = testMode ? allCalUrls.slice(0, 1) : allCalUrls;
+      console.log(`CAL mode: ${testMode ? 'TEST (1 page)' : 'FULL (5 pages)'}`);
 
       console.log(`CAL detected — scraping ${calUrls.length} pages (render_js=0 to bypass MemCyco SDK)`);
 
@@ -186,34 +190,45 @@ Deno.serve(async (req) => {
         const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
         const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
 
-        for (const calUrl of calUrls) {
-          console.log(`Scraping CAL page: ${calUrl}`);
+        // Fetch pages in batches of 2 — avoids overwhelming proxy with 5 concurrent Puppeteer tabs
+        console.log(`Fetching ${calUrls.length} CAL pages in batches of 2...`);
+        const fetchResults: any[] = [];
+        const batchSize = 2;
+        for (let i = 0; i < calUrls.length; i += batchSize) {
+          const batch = calUrls.slice(i, i + batchSize);
+          console.log(`Batch ${Math.floor(i/batchSize)+1}: fetching ${batch.length} pages`);
+          const batchResults = await Promise.all(
+            batch.map(async (calUrl) => {
+              console.log(`Scraping CAL page: ${calUrl}`);
+              const proxyEndpoint = `${calProxyUrl}/?key=${calProxyKey}&url=${encodeURIComponent(calUrl)}`;
+              try {
+                const calRes = await fetch(proxyEndpoint, {
+                  signal: AbortSignal.timeout(90000), // 90s per page
+                });
+                if (!calRes.ok) {
+                  console.error(`Failed to fetch CAL page: ${calUrl} — HTTP ${calRes.status}`);
+                  return { url: calUrl, status: `http-${calRes.status}`, htmlLength: 0, discounts: [] };
+                }
+                const pageHtml = await calRes.text();
+                console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
+                const pageDiscounts = extractCalBenefits(pageHtml, calUrl);
+                console.log(`Extracted ${pageDiscounts.length} discounts from ${calUrl}`);
+                return { url: calUrl, status: 'ok', htmlLength: pageHtml.length, discounts: pageDiscounts, htmlPreview: pageHtml.substring(0, 300) };
+              } catch (err: any) {
+                console.error(`Error fetching ${calUrl}: ${err.message}`);
+                return { url: calUrl, status: `error: ${err.message}`, htmlLength: 0, discounts: [] };
+              }
+            })
+          );
+          fetchResults.push(...batchResults);
+        }
 
-          // Route through VM proxy (Israeli residential IP, bypasses MemCyco anti-bot SDK)
-          const proxyEndpoint = `${calProxyUrl}/?key=${calProxyKey}&url=${encodeURIComponent(calUrl)}`;
-          const calRes = await fetch(proxyEndpoint, {
-            signal: AbortSignal.timeout(30000),
-          });
-
-          if (!calRes.ok) {
-            console.error(`Failed to fetch CAL page: ${calUrl} — HTTP ${calRes.status}`);
-            calPageResults.push({ url: calUrl, status: `http-${calRes.status}`, htmlLength: 0, discounts: 0 });
-            continue;
-          }
-
-          const pageHtml = await calRes.text();
-          console.log(`Got ${pageHtml.length} chars from ${calUrl}`);
-
-          // Direct regex extraction — same approach as Isracard
-          let pageDiscounts = extractCalBenefits(pageHtml, calUrl);
-          console.log(`Direct extraction from ${calUrl}: ${pageDiscounts.length} discounts`);
-
-          calPageResults.push({ url: calUrl, status: 'ok', htmlLength: pageHtml.length, discounts: pageDiscounts.length, htmlPreview: pageHtml.substring(0, 300) });
-
-          for (const d of pageDiscounts) {
+        for (const result of fetchResults) {
+          calPageResults.push({ url: result.url, status: result.status, htmlLength: result.htmlLength, discounts: result.discounts.length, htmlPreview: result.htmlPreview });
+          for (const d of result.discounts) {
             if (!seenTitles.has(d.title)) {
               seenTitles.add(d.title);
-              allDiscounts.push({ ...d, redeem_url: d.redeem_url || calUrl });
+              allDiscounts.push({ ...d, redeem_url: d.redeem_url || result.url });
             }
           }
         }
