@@ -172,7 +172,6 @@ Deno.serve(async (req) => {
         'https://www.cal-store.co.il/productlist.php?cid=B0E087D2-212B-4308-813D-C8693B2563F7',
         'https://www.cal-store.co.il/productlist.php?cid=11FAA02A-199E-4789-B826-4AD4FF5A8994',
         'https://www.cal-store.co.il/productlist.php?cid=6BA2A2E1-768B-47A5-A43C-97B745E0B8F6',
-        'https://www.cal-store.co.il/productlist.php?cid=97025B5D-4A33-49E6-9ED1-5B6571454A4E',
         'https://www.cal-store.co.il/productlist.php?cid=1A680972-97C4-4B2F-9950-37EC7297DA73',
       ];
       // In test mode, only scrape 1 page to verify the pipeline works
@@ -248,6 +247,7 @@ Deno.serve(async (req) => {
           const { error: insertError } = await supabase.from('discounts').insert(
             allDiscounts.map((d: any) => ({
               brand: d.brand || 'כאל',
+              brand_logo_url: d.brand_logo_url || null,
               title: d.title || '',
               description: d.description || null,
               discount_value: d.discount_value || '',
@@ -267,7 +267,7 @@ Deno.serve(async (req) => {
             );
           }
           return new Response(
-            JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai+ai-multi-page', pages: calUrls.length }),
+            JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai+ai-multi-page', pages: calUrls.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
@@ -276,6 +276,116 @@ Deno.serve(async (req) => {
         console.error('CAL scrape error:', errMsg);
         return new Response(
           JSON.stringify({ success: false, error: `CAL exception: ${errMsg}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // ─── Yours (שלך): 4 category pages, no auth, no bot protection ───
+    const isYours = membership.slug === 'yours' || membership.scrape_url?.includes('yours.co.il');
+    if (isYours) {
+      const allYoursUrls = [
+        { url: 'https://yours.co.il/category/866',  category: 'מזון' },
+        { url: 'https://yours.co.il/category/753',  category: 'קניות' },
+        { url: 'https://yours.co.il/category/1777', category: 'קניות אונליין' },
+        { url: 'https://yours.co.il/category/789',  category: 'בידור' },
+      ];
+      const yoursUrls = testMode ? allYoursUrls.slice(0, 1) : allYoursUrls;
+      console.log(`Yours mode: ${testMode ? 'TEST (1 page)' : 'FULL (4 pages)'}`);
+
+      try {
+        const allDiscounts: any[] = [];
+        const seenTitles = new Set<string>();
+        const pageResults: any[] = [];
+
+        const batchSize = 2;
+        for (let i = 0; i < yoursUrls.length; i += batchSize) {
+          const batch = yoursUrls.slice(i, i + batchSize);
+          console.log(`Batch ${Math.floor(i / batchSize) + 1}: fetching ${batch.length} Yours pages`);
+          const batchResults = await Promise.all(
+            batch.map(async ({ url, category }) => {
+              console.log(`Scraping Yours page: ${url}`);
+              const params = new URLSearchParams({
+                api_key: webscrapingKey,
+                url,
+                country: 'il',
+                render_js: '1',
+                proxy: 'residential',
+                timeout: '45000',
+                wait: '3000',
+              });
+              try {
+                const res = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
+                  signal: AbortSignal.timeout(55000),
+                });
+                if (!res.ok) {
+                  console.error(`Failed ${url}: HTTP ${res.status}`);
+                  return { url, category, status: `http-${res.status}`, htmlLength: 0, discounts: [] };
+                }
+                const html = await res.text();
+                console.log(`Got ${html.length} chars from ${url}`);
+                const discounts = extractYoursBenefits(html, category);
+                console.log(`Extracted ${discounts.length} from ${url}`);
+                return { url, category, status: 'ok', htmlLength: html.length, discounts };
+              } catch (err: any) {
+                console.error(`Error fetching ${url}: ${err.message}`);
+                return { url, category, status: `error: ${err.message}`, htmlLength: 0, discounts: [] };
+              }
+            })
+          );
+          for (const result of batchResults) {
+            pageResults.push({ url: result.url, status: result.status, htmlLength: result.htmlLength, discounts: result.discounts.length });
+            for (const d of result.discounts) {
+              if (!seenTitles.has(d.title)) {
+                seenTitles.add(d.title);
+                allDiscounts.push(d);
+              }
+            }
+          }
+        }
+
+        console.log(`Total Yours discounts: ${allDiscounts.length}`);
+
+        if (allDiscounts.length === 0) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'No discounts extracted from Yours pages', pageResults }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        await supabase.from('discounts').update({ is_active: false })
+          .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+        const { error: insertError } = await supabase.from('discounts').insert(
+          allDiscounts.map((d: any) => ({
+            brand: d.brand || 'שלך',
+            brand_logo_url: d.brand_logo_url || null,
+            title: d.title || '',
+            description: null,
+            discount_value: d.discount_value || '',
+            category: d.category || 'כללי',
+            location: 'כל הארץ',
+            redeem_url: d.redeem_url,
+            membership_id: membership.id,
+            scraped_at: new Date().toISOString(),
+            is_active: true,
+          }))
+        );
+        if (insertError) {
+          console.error('Insert error:', insertError);
+          return new Response(
+            JSON.stringify({ success: false, error: insertError.message, discountsFound: allDiscounts.length }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai-direct-extraction', pages: yoursUrls.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('Yours scrape error:', errMsg);
+        return new Response(
+          JSON.stringify({ success: false, error: `Yours exception: ${errMsg}` }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -508,11 +618,11 @@ function extractIsracardBenefits(html: string, baseUrl: string): any[] {
   return discounts;
 }
 
-// ─── CAL direct extractor — parses cal-store.co.il SSR product cards ───
-// Structure (server-rendered, no JS needed):
+// ─── CAL direct extractor — parses cal-store.co.il product list cards ───
+// List page structure (categories__text div per product card):
 //   <div class="categories__text">
 //     <a href="/product.php?pid=UUID&cid=UUID">
-//       <h3 class="font-weight-600">TITLE <span>החל מ-<span>₪</span>PRICE<span>במקום</span><span>₪ORIG</span></span></h3>
+//       <h3 class="font-weight-600">TITLE <span>...price info...</span></h3>
 //       <p class="d-table-row">DESCRIPTION</p>
 //     </a>
 //   </div>
@@ -522,49 +632,65 @@ function extractCalBenefits(html: string, baseUrl: string): any[] {
   const seen = new Set<string>();
   const base = 'https://www.cal-store.co.il';
 
-  // Match each product text block (the info card, not the image card)
   const blockRegex = /<div[^>]+class="[^"]*categories__text[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
   let blockMatch: RegExpExecArray | null;
 
   while ((blockMatch = blockRegex.exec(html)) !== null) {
     const inner = blockMatch[1];
 
-    // Product URL from <a href="/product.php?pid=...">
     const hrefMatch = inner.match(/href="(\/product\.php\?[^"]+)"/i);
     const redeemUrl = hrefMatch ? `${base}${hrefMatch[1]}` : baseUrl;
 
-    // Title: text content of <h3>, strip all child tags
     const h3Match = inner.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
     if (!h3Match) continue;
     const h3Inner = h3Match[1];
 
-    // Price span: "החל מ- ₪XXX במקום ₪YYY"
-    const priceSpanMatch = h3Inner.match(/<span[^>]*>([\s\S]*?)<\/span>/i);
-    const priceRaw = priceSpanMatch ? priceSpanMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+    // Strip all tags → clean readable text e.g. "תו קנייה לרשת BBB החל מ- ₪ 85 במקום ₪ 100"
+    const h3Text = h3Inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // Title = h3 text without the price span
-    const titleRaw = h3Inner.replace(/<span[\s\S]*?<\/span>/gi, '').replace(/<[^>]+>/g, '').trim();
+    // Title = everything before "החל מ-" (the price prefix); fallback: strip trailing number
+    const beforePriceMatch = h3Text.match(/^([\s\S]+?)\s+החל מ-/);
+    const titleRaw = beforePriceMatch
+      ? beforePriceMatch[1].trim()
+      : h3Text.replace(/\s+\d[\d,]*\s*$/, '').trim();
+
     if (!titleRaw || seen.has(titleRaw)) continue;
     seen.add(titleRaw);
 
-    // Description: <p class="d-table-row">TEXT</p>
+    // Extract all ₪ prices from h3 text: first = deal price, second = original price
+    const h3Prices = [...h3Text.matchAll(/₪\s*([\d,]+)/g)].map(m => m[1]);
+    const dealPrice = h3Prices[0] || null;
+    const origPrice = h3Prices[1] || null;
+
+    // Image: product card has data-setbg="URL" in a sibling div just before categories__text
+    const lookBefore = html.substring(Math.max(0, blockMatch.index - 700), blockMatch.index);
+    const bgMatch = lookBefore.match(/data-setbg="([^"]+)"/);
+    const imageUrl = bgMatch ? bgMatch[1] : null;
+
+    // Full descriptive title
+    let fullTitle = titleRaw;
+    if (dealPrice && origPrice) fullTitle = `${titleRaw} ב-₪${dealPrice} במקום ₪${origPrice}`;
+    else if (dealPrice) fullTitle = `${titleRaw} ב-₪${dealPrice}`;
+
+    // Discount value: % off when possible
+    let discountValue = dealPrice ? `₪${dealPrice}` : 'הטבה';
+    if (dealPrice && origPrice) {
+      const pct = Math.round((1 - parseInt(dealPrice.replace(',','')) / parseInt(origPrice.replace(',',''))) * 100);
+      if (pct > 0) discountValue = `${pct}% הנחה`;
+    }
+
     const descMatch = inner.match(/<p[^>]+class="[^"]*d-table-row[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
     const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : null;
 
-    // Discount value: parse "החל מ-₪XXX במקום ₪YYY" → "החל מ-₪XXX"
-    let discountValue = 'הטבה';
-    const priceClean = priceRaw.replace(/\s+/g, ' ').trim();
-    if (priceClean) {
-      // Try to extract "החל מ-₪NNN" part
-      const fromMatch = priceClean.match(/החל\s*מ[^₪]*₪\s*[\d,]+/);
-      if (fromMatch) discountValue = fromMatch[0].replace(/\s+/g, ' ').trim();
-      else discountValue = priceClean.substring(0, 40);
-    }
+    // Brand
+    let brand = 'כאל';
+    const englishBrand = titleRaw.match(/\b([A-Z][A-Za-z]{1,}(?:\s+[A-Z][A-Za-z]+)*)\b/);
+    const afterPrepBrand = titleRaw.match(/(?:לרשת|לאתר|לחנות|למסעדת|למסעד|לפיצרייה|לבית קפה|לקפה|לספא)\s+([^\d\s][^,\n]*?)(?=\s+\d|\s*$)/);
+    if (englishBrand) brand = englishBrand[1];
+    else if (afterPrepBrand) brand = afterPrepBrand[1].trim();
+    else brand = titleRaw.split(/\s+/).slice(0, 2).join(' ') || 'כאל';
 
-    // Brand = first word(s) of the title (before first space or dash)
-    const brand = titleRaw.split(/[-–\s]/)[0].trim() || 'כאל';
-
-    // Category: infer from description/title keywords
+    // Category
     let category = 'כללי';
     const text = (titleRaw + ' ' + (description || '')).toLowerCase();
     if (/מסעד|אוכל|קפה|פיצ|שוקו|סושי|המבורג/.test(text)) category = 'מזון';
@@ -572,11 +698,53 @@ function extractCalBenefits(html: string, baseUrl: string): any[] {
     else if (/ספא|קוסמ|יופי|שיער|ניקוי|בריאות|כושר|ספורט/.test(text)) category = 'בריאות';
     else if (/אופנה|ביגוד|נעל|תיק|תכשיט/.test(text)) category = 'אופנה';
     else if (/נסיע|טיסה|מלון|תיירות|חופשה/.test(text)) category = 'תיירות';
-    else if (/אלקטרוני|מחשב|טלפון|חשמל/.test(text)) category = 'אלקטרוניקה';
     else if (/ילד|משפח|גן|פארק|אטרקצ/.test(text)) category = 'פנאי ומשפחה';
-    else if (/תווי|קנייה|סל|מזון/.test(text)) category = 'מזון';
+    else if (/תו|קנייה/.test(text)) category = 'קניות';
 
-    discounts.push({ brand, title: titleRaw, description, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
+    discounts.push({ brand, brand_logo_url: imageUrl, title: fullTitle, description, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
+  }
+
+  return discounts;
+}
+
+// ─── Yours (שלך) direct extractor ───
+// Card structure: <a class="card-item" href="/product/ID">
+//   <img class="card-img" src="URL">
+//   <h3 class="card-title">TITLE</h3>
+//   <p class="card-sub-title"><p>BRAND</p></p>
+//   <div class="card-price">החל מ- 49 ₪</div>
+
+function extractYoursBenefits(html: string, category: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+  const base = 'https://yours.co.il';
+
+  const blockRegex = /<a[^>]+class="card-item[^"]*"[^>]+href="(\/product\/\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(html)) !== null) {
+    const href = match[1];
+    const inner = match[2];
+
+    const titleMatch = inner.match(/<h3[^>]+class="card-title"[^>]*>([\s\S]*?)<\/h3>/i);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    const brandMatch = inner.match(/class="card-sub-title"[^>]*>\s*<p>([\s\S]*?)<\/p>/i);
+    const brand = brandMatch ? brandMatch[1].replace(/<[^>]+>/g, '').trim() : 'שלך';
+
+    const imgMatch = inner.match(/src="([^"]+)"[^>]*class="card-img"/i) || inner.match(/class="card-img"[^>]*src="([^"]+)"/i);
+    const brand_logo_url = imgMatch ? imgMatch[1] : null;
+
+    const priceMatch = inner.match(/class="card-price"[^>]*>([\s\S]*?)<\/div>/i);
+    let discount_value = 'הטבה';
+    if (priceMatch) {
+      discount_value = priceMatch[1].replace(/<[^>]+>/g, '').replace(/\u200F/g, '').replace(/&nbsp;/g, ' ').trim() || 'הטבה';
+    }
+
+    discounts.push({ brand, brand_logo_url, title, discount_value, category, redeem_url: `${base}${href}` });
   }
 
   return discounts;
