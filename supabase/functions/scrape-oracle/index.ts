@@ -31,6 +31,8 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
+
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
     const testMode = body?.test === true; // ?test=true → scrape only 1 page (for debugging)
@@ -391,6 +393,143 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── PaisPlus (פיס פלוס): 32 category pages, no auth, no bot protection ───
+    const isPaisPlus = membership.slug === 'pais' || membership.slug === 'paisplus' || membership.scrape_url?.includes('paisplus.co.il');
+    if (isPaisPlus) {
+      const allPaisPlusUrls = [
+        { url: 'https://paisplus.co.il/category/279',  category: 'קניות' },
+        { url: 'https://paisplus.co.il/category/296',  category: 'קניות אונליין' },
+        { url: 'https://paisplus.co.il/category/314',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1469', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1510', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1326', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1030', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1616', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1833', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/284',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/331',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/285',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/373',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/374',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/375',  category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1697', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/1738', category: 'מזון' },
+        { url: 'https://paisplus.co.il/category/305',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/304',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/451',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/310',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/306',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/655',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/307',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/282',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/291',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/292',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/337',  category: 'בידור' },
+        { url: 'https://paisplus.co.il/category/287',  category: 'בידור' },
+      ];
+      const paisPlusUrls = testMode ? allPaisPlusUrls.slice(0, 1) : allPaisPlusUrls;
+      console.log(`PaisPlus mode: ${testMode ? 'TEST (1 page)' : `FULL (${paisPlusUrls.length} pages)`}`);
+
+      try {
+        const allDiscounts: any[] = [];
+        const seenTitles = new Set<string>();
+        const pageResults: any[] = [];
+
+        const batchSize = 2;
+        for (let i = 0; i < paisPlusUrls.length; i += batchSize) {
+          const batch = paisPlusUrls.slice(i, i + batchSize);
+          console.log(`Batch ${Math.floor(i / batchSize) + 1}: fetching ${batch.length} PaisPlus pages`);
+          const batchResults = await Promise.all(
+            batch.map(async ({ url, category }) => {
+              try {
+                // Firecrawl with IL location — bypasses IP block, returns HTML for regex extractor
+                const fcRes = await fetch('https://api.firecrawl.dev/v1/scrape', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url, formats: ['markdown'], location: { country: 'IL', languages: ['he'] }, waitFor: 4000 }),
+                  signal: AbortSignal.timeout(40000),
+                });
+                if (!fcRes.ok) {
+                  console.error(`Firecrawl failed ${url}: HTTP ${fcRes.status}`);
+                  return { url, category, status: `http-${fcRes.status}`, htmlLength: 0, discounts: [] };
+                }
+                const fcData = await fcRes.json();
+                const html = fcData.data?.markdown || fcData.markdown || '';
+                console.log(`Got ${html.length} chars from ${url}`);
+                if (html.length < 1000) {
+                  console.error(`HTML too short for ${url} — skipping`);
+                  return { url, category, status: 'too-short', htmlLength: html.length, discounts: [] };
+                }
+                const discounts = extractPaisPlusBenefits(html, category);
+                console.log(`Extracted ${discounts.length} from ${url}`);
+                // Find first price in markdown for debugging
+                const cardIdx = html.indexOf('₪');
+                const htmlSnippet = cardIdx > -1 ? html.substring(Math.max(0, cardIdx - 300), cardIdx + 300) : html.substring(0, 400);
+                return { url, category, status: 'ok', htmlLength: html.length, discounts, htmlSnippet };
+              } catch (err: any) {
+                console.error(`Error fetching ${url}: ${err.message}`);
+                return { url, category, status: `error: ${err.message}`, htmlLength: 0, discounts: [] };
+              }
+            })
+          );
+          for (const result of batchResults) {
+            pageResults.push({ url: result.url, status: result.status, htmlLength: result.htmlLength, discounts: result.discounts.length, htmlSnippet: result.htmlSnippet });
+            for (const d of result.discounts) {
+              if (!seenTitles.has(d.title)) {
+                seenTitles.add(d.title);
+                allDiscounts.push(d);
+              }
+            }
+          }
+        }
+
+        console.log(`Total PaisPlus discounts: ${allDiscounts.length}`);
+
+        if (allDiscounts.length === 0) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'No discounts extracted from PaisPlus pages', pageResults }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        await supabase.from('discounts').update({ is_active: false })
+          .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+        const { error: insertError } = await supabase.from('discounts').insert(
+          allDiscounts.map((d: any) => ({
+            brand: d.brand || 'פיס פלוס',
+            brand_logo_url: d.brand_logo_url || null,
+            title: d.title || '',
+            description: null,
+            discount_value: d.discount_value || '',
+            category: d.category || 'כללי',
+            location: d.location || 'כל הארץ',
+            redeem_url: d.redeem_url,
+            membership_id: membership.id,
+            scraped_at: new Date().toISOString(),
+            is_active: true,
+          }))
+        );
+        if (insertError) {
+          console.error('Insert error:', insertError);
+          return new Response(
+            JSON.stringify({ success: false, error: insertError.message, discountsFound: allDiscounts.length }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'webscraping.ai-direct-extraction', pages: paisPlusUrls.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('PaisPlus scrape error:', errMsg);
+        return new Response(
+          JSON.stringify({ success: false, error: `PaisPlus exception: ${errMsg}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // Try WebScraping.ai first, then Firecrawl as fallback
     let html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
     let strategy = 'webscraping.ai';
@@ -745,6 +884,59 @@ function extractYoursBenefits(html: string, category: string): any[] {
     }
 
     discounts.push({ brand, brand_logo_url, title, discount_value, category, redeem_url: `${base}${href}` });
+  }
+
+  return discounts;
+}
+
+// ─── PaisPlus (פיס פלוס) direct extractor ───
+// Card structure: <a class="card-item regular category-page" href="/product/ID">
+//   <img class="card-img" src="URL">
+//   <h3 class="card-title">BRAND - TITLE</h3>
+//   <p class="card-sub-title">LOCATION</p>
+//   <div class="price-text">החל מ-</div><div class="price-number">52 ₪</div>
+
+// Parses Firecrawl markdown output for paisplus.co.il
+// Each card in markdown: [![TITLE](IMG_URL)\\\n\\\n**TITLE** \\\n\\\nBRAND \\\n\\\nהחל מ-\\\n\\\nPRICE ₪\\\n\\\nלרכישה](https://paisplus.co.il/product/ID)
+function extractPaisPlusBenefits(markdown: string, category: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+
+  // Match each markdown link block that points to a product URL
+  const blockRegex = /\[([\s\S]*?)\]\(https:\/\/paisplus\.co\.il(\/product\/\d+)\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(markdown)) !== null) {
+    const content = match[1];
+    const path = match[2];
+
+    // Must have a bold title — skip nav/menu links
+    const titleMatch = content.match(/\*\*([^*]+)\*\*/);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    // Image URL
+    const imgMatch = content.match(/!\[[^\]]*\]\(([^)]+)\)/);
+    const brand_logo_url = imgMatch ? imgMatch[1] : null;
+
+    // Member price: ₪ amount that appears AFTER "החל מ-" (not the face value in title)
+    const memberPriceMatch = content.match(/החל מ-[\s\S]*?([\d,]+)\s*₪/);
+    const memberPrice = memberPriceMatch ? memberPriceMatch[1] : null;
+    const discount_value = memberPrice ? `החל מ- ${memberPrice} ₪` : 'הטבה';
+
+    // Full title includes member price for clarity
+    const fullTitle = memberPrice ? `${title} ב-${memberPrice} ₪` : title;
+
+    // Brand: extract from title text — prefer English brand or text after "לרשת ואתר"/"לרשת"/"לאתר"
+    let brand = 'פיס פלוס';
+    const prepBrand = title.match(/(?:לרשת ואתר|לרשת|לאתר)\s+(.+?)$/);
+    const englishBrand = title.match(/\b([A-Z][A-Za-z &]{1,30})\b/);
+    if (prepBrand) brand = prepBrand[1].trim();
+    else if (englishBrand) brand = englishBrand[1].trim();
+
+    discounts.push({ brand, brand_logo_url, title: fullTitle, discount_value, category, location: 'כל הארץ', redeem_url: `https://paisplus.co.il${path}` });
   }
 
   return discounts;

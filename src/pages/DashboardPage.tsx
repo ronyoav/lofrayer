@@ -107,7 +107,7 @@ const DashboardPage = () => {
         <div className="mx-auto max-w-md">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold">LoFrayer 🔍</h1>
+              <img src="/new_logo.png" alt="LoFrayer" className="h-10 w-auto object-contain" />
               <p className="text-sm opacity-90">
                 {filteredDiscounts.length} הנחות זמינות
               </p>
