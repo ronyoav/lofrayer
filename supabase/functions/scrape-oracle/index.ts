@@ -51,6 +51,28 @@ Deno.serve(async (req) => {
     }
 
     const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
+
+    // SSRF protection: only allow known Israeli benefit sites
+    const ALLOWED_SCRAPE_HOSTS = [
+      'behatzada.mod.gov.il', 'benefits.isracard.co.il', 'cal-store.co.il',
+      'yours.co.il', 'paisplus.co.il', 'www.hever.co.il', 'max.co.il',
+      'clubhub.co.il', 'hofesh.co.il', 'clalbit.co.il',
+    ];
+    try {
+      const scrapeHost = new URL(scrapeUrl).hostname;
+      if (!ALLOWED_SCRAPE_HOSTS.some(h => scrapeHost === h || scrapeHost.endsWith('.' + h))) {
+        return new Response(
+          JSON.stringify({ error: `scrape_url host not permitted: ${scrapeHost}` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } catch {
+      return new Response(
+        JSON.stringify({ error: 'Invalid scrape_url' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
 
     // ─── Isracard: WebScraping.ai with residential Israeli IP + AI parsing ───
