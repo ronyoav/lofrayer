@@ -21,8 +21,8 @@ const DashboardPage = () => {
   const [selectedCategory, setSelectedCategory] = useState("הכל");
   const [selectedLocation, setSelectedLocation] = useState("כל הארץ");
   const [showFilters, setShowFilters] = useState(false);
-  const [scrapingSlug, setScrapingSlug] = useState<string | null>(null);
-  const [isScraping, setIsScraping] = useState(false);
+  const [scrapingSlug, setScrapingSlug] = useState<string | null>(null); // slug of the single membership being scraped
+  const [isScrapingAll, setIsScrapingAll] = useState(false); // true when scraping all memberships at once
 
   const { data: discounts = [], isLoading, refetch } = useDiscounts(userMemberships);
   const { data: allMemberships = [] } = useMemberships();
@@ -54,7 +54,7 @@ const DashboardPage = () => {
   };
 
   const handleScrapeAll = async () => {
-    setIsScraping(true);
+    setIsScrapingAll(true);
     try {
       const { data, error } = await supabase.functions.invoke('scrape-discounts');
       if (error) throw error;
@@ -69,7 +69,7 @@ const DashboardPage = () => {
     } catch (err) {
       toast({ title: "שגיאה", description: "נכשל בסריקת הנחות", variant: "destructive" });
     } finally {
-      setIsScraping(false);
+      setIsScrapingAll(false);
     }
   };
 
@@ -122,11 +122,11 @@ const DashboardPage = () => {
               </button>
               <button
                 onClick={handleScrapeAll}
-                disabled={isScraping}
+                disabled={isScrapingAll}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
-                aria-label={isScraping ? "סורק הנחות..." : "סרוק הנחות מכל האתרים"}
+                aria-label={isScrapingAll ? "סורק הנחות..." : "סרוק הנחות מכל האתרים"}
               >
-                <RefreshCw className={`h-5 w-5 ${isScraping ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <RefreshCw className={`h-5 w-5 ${isScrapingAll ? 'animate-spin' : ''}`} aria-hidden="true" />
               </button>
               <button
                 onClick={handleReset}
@@ -160,13 +160,13 @@ const DashboardPage = () => {
             <p className="text-xs font-medium text-muted-foreground mb-2">סרוק הנחות לפי מנוי:</p>
             <div className="flex flex-wrap gap-2">
               {myMemberships.map((m) => {
-                const isThisScraping = scrapingSlug === m.slug;
+                const isThisScrapingAll = scrapingSlug === m.slug;
                 const hasScrapeUrl = !!m.scrape_url;
                 return (
                   <button
                     key={m.slug}
                     onClick={() => handleScrapeOne(m.slug, m.name)}
-                    disabled={isThisScraping || !hasScrapeUrl || isScraping}
+                    disabled={isThisScrapingAll || !hasScrapeUrl || isScrapingAll}
                     className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all
                       ${hasScrapeUrl
                         ? "bg-accent text-accent-foreground hover:bg-accent/80"
@@ -174,7 +174,7 @@ const DashboardPage = () => {
                       } disabled:opacity-50`}
                     title={hasScrapeUrl ? `סרוק הנחות מ-${m.name}` : "אין כתובת סריקה"}
                   >
-                    {isThisScraping ? (
+                    {isThisScrapingAll ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
                       <RefreshCw className="h-3 w-3" />
@@ -258,10 +258,10 @@ const DashboardPage = () => {
               <p className="text-sm text-muted-foreground mb-4">נסה לשנות את החיפוש או הסינון</p>
               <button
                 onClick={handleScrapeAll}
-                disabled={isScraping}
+                disabled={isScrapingAll}
                 className="text-sm text-primary underline hover:no-underline disabled:opacity-50"
               >
-                {isScraping ? "סורק..." : "סרוק הנחות חדשות מהאתרים"}
+                {isScrapingAll ? "סורק..." : "סרוק הנחות חדשות מהאתרים"}
               </button>
             </div>
           ) : (

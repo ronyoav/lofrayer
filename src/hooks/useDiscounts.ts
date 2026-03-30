@@ -36,11 +36,12 @@ export function useDiscounts(membershipSlugs: string[]) {
     queryKey: ["discounts", membershipSlugs],
     queryFn: async () => {
       // First get membership IDs from slugs
-      const { data: memberships } = await supabase
+      const { data: memberships, error: membershipsError } = await supabase
         .from("memberships")
         .select("id, slug, name")
         .in("slug", membershipSlugs);
 
+      if (membershipsError) throw membershipsError;
       if (!memberships || memberships.length === 0) return [];
 
       const membershipIds = memberships.map((m) => m.id);
@@ -61,9 +62,10 @@ export function useDiscounts(membershipSlugs: string[]) {
         membership: membershipMap[d.membership_id] || null,
         // Use local brand logo if available, otherwise DB logo
         brandLogo: BRAND_LOGOS[d.brand] || d.brand_logo_url || null,
-        membershipName: (membershipMap[d.membership_id]?.name || "")
-          .replace('פועלים Wonder - מזון', 'פועלים Wonder')
-          .replace('פועלים Wonder - בידור', 'פועלים Wonder'),
+        membershipName: (() => {
+          const name = membershipMap[d.membership_id]?.name || "";
+          return name.startsWith('פועלים Wonder') ? 'פועלים Wonder' : name;
+        })(),
       }));
     },
     enabled: membershipSlugs.length > 0,

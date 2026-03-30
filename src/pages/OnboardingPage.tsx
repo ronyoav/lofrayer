@@ -8,7 +8,7 @@ import {
   setLocationEnabled,
 } from "@/lib/storage";
 import { useNavigate } from "react-router-dom";
-import { useMemberships } from "@/hooks/useDiscounts";
+import { useMemberships, DbMembership } from "@/hooks/useDiscounts";
 
 const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
   "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
@@ -23,60 +23,46 @@ const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
 };
 
 const MEMBERSHIP_EMOJIS: Record<string, string> = {
-  // צבא וביטחון
-  "behatzada": "🎖️",
-  "hever": "🤝",
-  "idf-disabled": "🎗️",
-  "police": "👮",
-  // בנקים
-  "bank-hapoalim": "🏦",
-  "bank-leumi": "🏦",
-  "bank-discount": "🏦",
-  "bank-mizrahi": "🏦",
-  "bank-yahav": "🏦",
-  "bank-benleumi": "🏦",
-  "poalim-wonder": "✨",
-  "mafteah-discount": "🔑",
-  // כרטיסי אשראי
-  "cal": "💳",
-  "max": "💳",
-  "iscard": "💳",
-  "visa-cal": "💳",
-  "isracard-benefits": "💳",
-  // קופות חולים
-  "clalit": "🏥",
-  "maccabi": "🏥",
-  "leumit": "🏥",
-  "meuhedet": "🏥",
-  // הסתדרויות
-  "histadrut": "✊",
-  "histadrut-morim": "📚",
-  "histadrut-medina": "🏛️",
-  "histadrut-refuit": "⚕️",
-  // תקשורת ואנרגיה
-  "hot-club": "📺",
-  "partner": "📱",
-  "cellcom": "📱",
-  "pelephone": "📱",
-  "yellow-paz": "⛽",
-  "sonol": "⛽",
-  // ביטוח
-  "migdal": "🛡️",
-  "harel": "🛡️",
-  "menora": "🛡️",
-  "clal-insurance": "🛡️",
-  // מועדוני צרכנות
-  "face": "😊",
-  "clubhub": "🎯",
-  "pais-plus": "🎰",
-  "hofesh": "🌴",
-  // לשכות
-  "lishkat-orchei-din": "⚖️",
-  "lishkat-roei-heshbon": "📊",
-  // רשתות
-  "rami-levy-club": "🛒",
-  "shufersal-club": "🛒",
+  "behatzada": "🎖️", "hever": "🤝", "idf-disabled": "🎗️", "police": "👮",
+  "bank-hapoalim": "🏦", "bank-leumi": "🏦", "bank-discount": "🏦",
+  "bank-mizrahi": "🏦", "bank-yahav": "🏦", "bank-benleumi": "🏦",
+  "poalim-wonder": "✨", "mafteah-discount": "🔑",
+  "cal": "💳", "max": "💳", "iscard": "💳", "visa-cal": "💳", "isracard-benefits": "💳",
+  "clalit": "🏥", "maccabi": "🏥", "leumit": "🏥", "meuhedet": "🏥",
+  "histadrut": "✊", "histadrut-morim": "📚", "histadrut-medina": "🏛️", "histadrut-refuit": "⚕️",
+  "hot-club": "📺", "partner": "📱", "cellcom": "📱", "pelephone": "📱",
+  "yellow-paz": "⛽", "sonol": "⛽",
+  "migdal": "🛡️", "harel": "🛡️", "menora": "🛡️", "clal-insurance": "🛡️",
+  "face": "😊", "clubhub": "🎯", "pais-plus": "🎰", "hofesh": "🌴",
+  "lishkat-orchei-din": "⚖️", "lishkat-roei-heshbon": "📊",
+  "rami-levy-club": "🛒", "shufersal-club": "🛒",
 };
+
+// Pre-computed set of all categorized slugs — avoids recomputing on every render
+const ALL_CATEGORIZED_SLUGS = new Set(Object.values(MEMBERSHIP_CATEGORIES).flat());
+
+interface MembershipButtonProps {
+  membership: DbMembership;
+  isSelected: boolean;
+  onToggle: (slug: string) => void;
+}
+
+const MembershipButton = ({ membership, isSelected, onToggle }: MembershipButtonProps) => (
+  <button
+    onClick={() => onToggle(membership.slug)}
+    aria-pressed={isSelected}
+    className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+      isSelected
+        ? "bg-accent border-2 border-primary shadow-card"
+        : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+    }`}
+  >
+    <span className="text-lg">{MEMBERSHIP_EMOJIS[membership.slug] || "🏷️"}</span>
+    <span className="text-xs font-medium text-foreground leading-tight">
+      {membership.name}
+    </span>
+  </button>
+);
 
 const OnboardingPage = () => {
   const navigate = useNavigate();
@@ -92,10 +78,18 @@ const OnboardingPage = () => {
     );
   }, [memberships, searchQuery]);
 
+  const uncategorizedMemberships = useMemo(
+    () => filteredMemberships.filter((m) => !ALL_CATEGORIZED_SLUGS.has(m.slug)),
+    [filteredMemberships]
+  );
+
   const handleLocationPermission = (allow: boolean) => {
     setLocationEnabled(allow);
     if (allow) {
-      navigator.geolocation?.getCurrentPosition(() => {}, () => {});
+      navigator.geolocation?.getCurrentPosition(
+        () => {},
+        () => setLocationEnabled(false) // permission denied by browser
+      );
     }
     setStep("memberships");
   };
@@ -163,10 +157,11 @@ const OnboardingPage = () => {
           בחר/י את כל המנויים שלך כדי שנמצא לך את כל ההנחות
         </p>
 
-        {/* Search */}
         <div className="relative mb-6">
-          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <label htmlFor="membership-search" className="sr-only">חפש מנוי</label>
           <Input
+            id="membership-search"
             placeholder="חפש מנוי..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -175,8 +170,8 @@ const OnboardingPage = () => {
         </div>
 
         {isLoading ? (
-          <div className="py-8 text-center">
-            <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" />
+          <div className="py-8 text-center" role="status" aria-label="טוען מנויים">
+            <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" aria-hidden="true" />
             <p className="text-muted-foreground">טוען מנויים...</p>
           </div>
         ) : (
@@ -188,57 +183,31 @@ const OnboardingPage = () => {
                 <div key={category}>
                   <p className="text-sm font-semibold text-muted-foreground mb-2">{category}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {categoryMemberships.map((m) => {
-                      const isSelected = selected.includes(m.slug);
-                      return (
-                        <button
-                          key={m.slug}
-                          onClick={() => toggleMembership(m.slug)}
-                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
-                            isSelected
-                              ? "bg-accent border-2 border-primary shadow-card"
-                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-                          }`}
-                        >
-                          <span className="text-lg">{MEMBERSHIP_EMOJIS[m.slug] || "🏷️"}</span>
-                          <span className="text-xs font-medium text-foreground leading-tight">
-                            {m.name}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {categoryMemberships.map((m) => (
+                      <MembershipButton
+                        key={m.slug}
+                        membership={m}
+                        isSelected={selected.includes(m.slug)}
+                        onToggle={toggleMembership}
+                      />
+                    ))}
                   </div>
                 </div>
               );
             })}
-            {/* Show uncategorized memberships */}
-            {filteredMemberships
-              .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
-              .length > 0 && (
+
+            {uncategorizedMemberships.length > 0 && (
               <div>
                 <p className="text-sm font-semibold text-muted-foreground mb-2">🏷️ אחר</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {filteredMemberships
-                    .filter((m) => !Object.values(MEMBERSHIP_CATEGORIES).flat().includes(m.slug))
-                    .map((m) => {
-                      const isSelected = selected.includes(m.slug);
-                      return (
-                        <button
-                          key={m.slug}
-                          onClick={() => toggleMembership(m.slug)}
-                          className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
-                            isSelected
-                              ? "bg-accent border-2 border-primary shadow-card"
-                              : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-                          }`}
-                        >
-                          <span className="text-lg">🏷️</span>
-                          <span className="text-xs font-medium text-foreground leading-tight">
-                            {m.name}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  {uncategorizedMemberships.map((m) => (
+                    <MembershipButton
+                      key={m.slug}
+                      membership={m}
+                      isSelected={selected.includes(m.slug)}
+                      onToggle={toggleMembership}
+                    />
+                  ))}
                 </div>
               </div>
             )}

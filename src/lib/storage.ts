@@ -2,7 +2,11 @@
 
 export const getSelectedMemberships = (): string[] => {
   const stored = localStorage.getItem('lofrayer-memberships');
-  return stored ? JSON.parse(stored) : [];
+  try {
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
 };
 
 export const setSelectedMemberships = (ids: string[]) => {
