@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Plus, Trash2, Edit2, Save, X, Loader2, Camera } from "lucide-react";
+import { ArrowRight, Plus, Trash2, Edit2, Save, X, Loader2, Camera, LogOut } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -205,9 +205,14 @@ const AdminPage = () => {
       <div className="bg-gradient-to-l from-primary to-primary/80 text-primary-foreground p-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-bold">⚙️ ניהול הנחות</h1>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard")} className="text-primary-foreground">
-            חזרה לדשבורד <ArrowRight className="mr-1 h-4 w-4" />
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard")} className="text-primary-foreground">
+              חזרה לדשבורד <ArrowRight className="mr-1 h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => supabase.auth.signOut().then(() => navigate("/login"))} className="text-primary-foreground">
+              <LogOut className="ml-1 h-4 w-4" /> יציאה
+            </Button>
+          </div>
         </div>
       </div>
 

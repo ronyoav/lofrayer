@@ -5,22 +5,44 @@ const corsHeaders = {
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+const RATE_LIMIT_MAX = 10; // max requests per IP per minute
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Auth check: require a valid Supabase session JWT
+    const authHeader = req.headers.get('Authorization');
+    const { data: { user } } = await supabase.auth.getUser(
+      authHeader?.replace('Bearer ', '') ?? ''
+    );
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Rate limiting: 10 requests per IP per minute
+    const clientIp = req.headers.get('CF-Connecting-IP') ?? 'unknown';
+    const { data: requestCount } = await supabase.rpc('increment_rate_limit', { p_ip: clientIp });
+    if (requestCount > RATE_LIMIT_MAX) {
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded. Try again in a minute.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
+      );
+    }
+
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
     if (!lovableApiKey) {
       return new Response(JSON.stringify({ error: 'LOVABLE_API_KEY not configured' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json();
     const { images, membership_slug, category_hint, skip_deactivate } = body;

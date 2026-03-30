@@ -17,11 +17,20 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Auth check: require a valid Supabase session JWT
+    const authHeader = req.headers.get('Authorization');
+    const { data: { user } } = await supabase.auth.getUser(
+      authHeader?.replace('Bearer ', '') ?? ''
+    );
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // Rate limiting: 10 requests per IP per minute
-    const clientIp =
-      req.headers.get('CF-Connecting-IP') ||
-      req.headers.get('X-Forwarded-For')?.split(',')[0].trim() ||
-      'unknown';
+    // Only use CF-Connecting-IP (set by Cloudflare, cannot be spoofed).
+    // X-Forwarded-For is user-controlled and would allow rate limit bypass.
+    const clientIp = req.headers.get('CF-Connecting-IP') ?? 'unknown';
 
     const { data: requestCount } = await supabase.rpc('increment_rate_limit', { p_ip: clientIp });
     if (requestCount > RATE_LIMIT_MAX) {
