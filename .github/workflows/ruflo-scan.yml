@@ -1,0 +1,33 @@
+name: Security Scan with Ruflo
+
+# מתי להריץ את הסריקה (בכל Push או Pull Request)
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+# ביטול ריצה קודמת אם נדחפה גרסה חדשה לאותה ענף
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  ruflo_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Ruflo Scan
+        uses: ruvnet/ruflo-action@v1
+        with:
+          # כאן אתה מגדיר מה לסרוק. '.' אומר לסרוק את כל הפרויקט הנוכחי
+          args: scan .
+        env:
+          # שימוש בטוקן הפנימי של גיטהאב כדי לאפשר לרופלו גישה
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
