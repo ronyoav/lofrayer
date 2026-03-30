@@ -5,12 +5,32 @@ const corsHeaders = {
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+const RATE_LIMIT_MAX = 10; // max requests per IP per minute
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Rate limiting: 10 requests per IP per minute
+    const clientIp =
+      req.headers.get('CF-Connecting-IP') ||
+      req.headers.get('X-Forwarded-For')?.split(',')[0].trim() ||
+      'unknown';
+
+    const { data: requestCount } = await supabase.rpc('increment_rate_limit', { p_ip: clientIp });
+    if (requestCount > RATE_LIMIT_MAX) {
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded. Try again in a minute.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
+      );
+    }
+
     const webscrapingKey = Deno.env.get('WEBSCRAPING_AI_KEY');
     if (!webscrapingKey) {
       return new Response(
@@ -26,10 +46,6 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
 
