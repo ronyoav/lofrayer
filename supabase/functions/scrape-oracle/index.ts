@@ -462,10 +462,7 @@ Deno.serve(async (req) => {
                 }
                 const discounts = extractPaisPlusBenefits(html, category);
                 console.log(`Extracted ${discounts.length} from ${url}`);
-                // Find first price in markdown for debugging
-                const cardIdx = html.indexOf('₪');
-                const htmlSnippet = cardIdx > -1 ? html.substring(Math.max(0, cardIdx - 300), cardIdx + 300) : html.substring(0, 400);
-                return { url, category, status: 'ok', htmlLength: html.length, discounts, htmlSnippet };
+                return { url, category, status: 'ok', htmlLength: html.length, discounts };
               } catch (err: any) {
                 console.error(`Error fetching ${url}: ${err.message}`);
                 return { url, category, status: `error: ${err.message}`, htmlLength: 0, discounts: [] };
@@ -473,7 +470,7 @@ Deno.serve(async (req) => {
             })
           );
           for (const result of batchResults) {
-            pageResults.push({ url: result.url, status: result.status, htmlLength: result.htmlLength, discounts: result.discounts.length, htmlSnippet: result.htmlSnippet });
+            pageResults.push({ url: result.url, status: result.status, htmlLength: result.htmlLength, discounts: result.discounts.length });
             for (const d of result.discounts) {
               if (!seenTitles.has(d.title)) {
                 seenTitles.add(d.title);

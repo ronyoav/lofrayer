@@ -1,10 +1,25 @@
-interface DiscountCardProps {
-  discount: any;
+interface Discount {
+  id: string;
+  brand: string;
+  brandLogo?: string;
+  title: string;
+  description?: string;
+  discountValue: string;
+  membershipId: string;
+  membershipName: string;
+  category: string;
+  location?: string;
+  redeemUrl: string;
 }
+
+interface DiscountCardProps {
+  discount: Discount;
+}
+
 const DiscountCard = ({ discount }: DiscountCardProps) => {
   return (
     <a
-      href={discount.redeem_url || discount.redeemUrl || '#'}
+      href={discount.redeemUrl}
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`${discount.brand} — ${discount.title} (נפתח בחלון חדש)`}
@@ -12,15 +27,15 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
     >
       <div className="p-4 flex items-start gap-4">
         <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-accent flex items-center justify-center overflow-hidden">
-          {(discount.brandLogo || discount.brand_logo_url) ? (
+          {discount.brandLogo ? (
             <img
-              src={discount.brandLogo || discount.brand_logo_url}
+              src={discount.brandLogo}
               alt={discount.brand}
               className="w-12 h-12 object-contain"
             />
           ) : (
             <span className="text-xl font-bold text-accent-foreground" aria-hidden="true">
-              {discount.brand?.charAt(0) || '?'}
+              {discount.brand.charAt(0)}
             </span>
           )}
         </div>
@@ -30,7 +45,7 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
               {discount.brand}
             </h3>
             <span className="flex-shrink-0 mr-2 inline-flex items-center rounded-full bg-savings-light px-3 py-1 text-sm font-bold text-accent-foreground">
-              {discount.discountValue || discount.discount_value}
+              {discount.discountValue}
             </span>
           </div>
           <p className="text-sm text-foreground mb-1 leading-snug">
@@ -61,4 +76,5 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
     </a>
   );
 };
+
 export default DiscountCard;
