@@ -116,32 +116,34 @@ const DashboardPage = () => {
               <button
                 onClick={() => navigate("/admin")}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
-                title="ניהול הנחות"
+                aria-label="ניהול הנחות"
               >
-                <Settings className="h-5 w-5" />
+                <Settings className="h-5 w-5" aria-hidden="true" />
               </button>
               <button
                 onClick={handleScrapeAll}
                 disabled={isScraping}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
-                title="סרוק הנחות מכל האתרים"
+                aria-label={isScraping ? "סורק הנחות..." : "סרוק הנחות מכל האתרים"}
               >
-                <RefreshCw className={`h-5 w-5 ${isScraping ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-5 w-5 ${isScraping ? 'animate-spin' : ''}`} aria-hidden="true" />
               </button>
               <button
                 onClick={handleReset}
                 className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors"
-                title="איפוס הגדרות"
+                aria-label="איפוס הגדרות"
               >
-                <LogOut className="h-5 w-5" />
+                <LogOut className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
           </div>
 
           {/* Search */}
           <div className="relative">
-            <Search className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <label htmlFor="discount-search" className="sr-only">חפש מותג או הנחה</label>
             <Input
+              id="discount-search"
               placeholder="חפש מותג או הנחה..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -188,21 +190,24 @@ const DashboardPage = () => {
         {/* Filters toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
+          aria-expanded={showFilters}
+          aria-controls="filters-panel"
           className="mt-2 mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
-          <SlidersHorizontal className="h-4 w-4" />
+          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           סינון
         </button>
 
         {showFilters && (
-          <div className="mb-4 space-y-3 rounded-xl bg-card p-4 shadow-card animate-in slide-in-from-top-2">
+          <div id="filters-panel" className="mb-4 space-y-3 rounded-xl bg-card p-4 shadow-card animate-in slide-in-from-top-2">
             <div>
               <p className="mb-2 text-xs font-medium text-muted-foreground">קטגוריה</p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2" role="group" aria-label="סינון לפי קטגוריה">
                 {CATEGORIES.map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
+                    aria-pressed={selectedCategory === cat}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
                       selectedCategory === cat
                         ? "gradient-primary text-primary-foreground"
@@ -216,14 +221,15 @@ const DashboardPage = () => {
             </div>
             <div>
               <p className="mb-2 text-xs font-medium text-muted-foreground">
-                <MapPin className="inline h-3 w-3 ml-1" />
+                <MapPin className="inline h-3 w-3 ml-1" aria-hidden="true" />
                 מיקום
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2" role="group" aria-label="סינון לפי מיקום">
                 {LOCATIONS.map((loc) => (
                   <button
                     key={loc}
                     onClick={() => setSelectedLocation(loc)}
+                    aria-pressed={selectedLocation === loc}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
                       selectedLocation === loc
                         ? "gradient-primary text-primary-foreground"
@@ -241,8 +247,8 @@ const DashboardPage = () => {
         {/* Discounts list */}
         <div className="space-y-3 pb-8">
           {isLoading ? (
-            <div className="py-16 text-center">
-              <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" />
+            <div className="py-16 text-center" role="status" aria-label="טוען הנחות">
+              <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" aria-hidden="true" />
               <p className="text-muted-foreground">טוען הנחות...</p>
             </div>
           ) : filteredDiscounts.length === 0 ? (

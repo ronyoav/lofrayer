@@ -7,15 +7,22 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
       href={discount.redeem_url || discount.redeemUrl || '#'}
       target="_blank"
       rel="noopener noreferrer"
+      aria-label={`${discount.brand} — ${discount.title} (נפתח בחלון חדש)`}
       className="block rounded-2xl bg-card shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden group"
     >
       <div className="p-4 flex items-start gap-4">
         <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-accent flex items-center justify-center overflow-hidden">
-          <img
-            src={discount.brandLogo || discount.brand_logo_url || ''}
-            alt={discount.brand}
-            className="w-12 h-12 object-contain"
-          />
+          {(discount.brandLogo || discount.brand_logo_url) ? (
+            <img
+              src={discount.brandLogo || discount.brand_logo_url}
+              alt={discount.brand}
+              className="w-12 h-12 object-contain"
+            />
+          ) : (
+            <span className="text-xl font-bold text-accent-foreground" aria-hidden="true">
+              {discount.brand?.charAt(0) || '?'}
+            </span>
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-1">
