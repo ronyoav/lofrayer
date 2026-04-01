@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut, RefreshCw, Loader2, Settings } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, LogOut, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CATEGORIES, LOCATIONS } from "@/data/mockData";
 import {
@@ -9,27 +9,17 @@ import {
 } from "@/lib/storage";
 import DiscountCard from "@/components/DiscountCard";
 import { useNavigate } from "react-router-dom";
-import { useDiscounts, useMemberships } from "@/hooks/useDiscounts";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useDiscounts } from "@/hooks/useDiscounts";
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const { toast } = useToast();
   const userMemberships = getSelectedMemberships();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("הכל");
   const [selectedLocation, setSelectedLocation] = useState("כל הארץ");
   const [showFilters, setShowFilters] = useState(false);
-  const [scrapingSlug, setScrapingSlug] = useState<string | null>(null); // slug of the single membership being scraped
-  const [isScrapingAll, setIsScrapingAll] = useState(false); // true when scraping all memberships at once
 
-  const { data: discounts = [], isLoading, refetch } = useDiscounts(userMemberships);
-  const { data: allMemberships = [] } = useMemberships();
-
-  const myMemberships = useMemo(() => {
-    return allMemberships.filter((m) => userMemberships.includes(m.slug));
-  }, [allMemberships, userMemberships]);
+  const { data: discounts = [], isLoading } = useDiscounts(userMemberships);
 
   const filteredDiscounts = useMemo(() => {
     return discounts.filter((d) => {
@@ -53,53 +43,6 @@ const DashboardPage = () => {
     navigate("/");
   };
 
-  const handleScrapeAll = async () => {
-    setIsScrapingAll(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('scrape-discounts');
-      if (error) throw error;
-      const results = data?.results || [];
-      const successCount = results.filter((r: any) => r.status === 'success').length;
-      const totalDiscounts = results.reduce((acc: number, r: any) => acc + (r.discountsFound || 0), 0);
-      toast({
-        title: "סריקה הושלמה",
-        description: `נסרקו ${successCount} אתרים, נמצאו ${totalDiscounts} הנחות חדשות`,
-      });
-      refetch();
-    } catch (err) {
-      toast({ title: "שגיאה", description: "נכשל בסריקת הנחות", variant: "destructive" });
-    } finally {
-      setIsScrapingAll(false);
-    }
-  };
-
-  const handleScrapeOne = async (slug: string, name: string) => {
-    setScrapingSlug(slug);
-    try {
-      const { data, error } = await supabase.functions.invoke('scrape-oracle', {
-        body: { slug },
-      });
-      if (error) throw error;
-      if (data?.success) {
-        toast({
-          title: `הנחות ${name}`,
-          description: `נמצאו ${data.discountsFound} הנחות חדשות`,
-        });
-      } else {
-        toast({
-          title: `${name}`,
-          description: data?.error || 'לא נמצאו הנחות',
-          variant: "destructive",
-        });
-      }
-      refetch();
-    } catch (err) {
-      toast({ title: "שגיאה", description: `נכשל בסריקת ${name}`, variant: "destructive" });
-    } finally {
-      setScrapingSlug(null);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -119,14 +62,6 @@ const DashboardPage = () => {
                 aria-label="ניהול הנחות"
               >
                 <Settings className="h-5 w-5" aria-hidden="true" />
-              </button>
-              <button
-                onClick={handleScrapeAll}
-                disabled={isScrapingAll}
-                className="rounded-full p-2 hover:bg-primary-foreground/10 transition-colors disabled:opacity-50"
-                aria-label={isScrapingAll ? "סורק הנחות..." : "סרוק הנחות מכל האתרים"}
-              >
-                <RefreshCw className={`h-5 w-5 ${isScrapingAll ? 'animate-spin' : ''}`} aria-hidden="true" />
               </button>
               <button
                 onClick={handleReset}
@@ -154,39 +89,6 @@ const DashboardPage = () => {
       </div>
 
       <div className="mx-auto max-w-md px-4">
-        {/* My Memberships - scrape buttons */}
-        {myMemberships.length > 0 && (
-          <div className="mt-4 mb-3">
-            <p className="text-xs font-medium text-muted-foreground mb-2">סרוק הנחות לפי מנוי:</p>
-            <div className="flex flex-wrap gap-2">
-              {myMemberships.map((m) => {
-                const isThisScrapingAll = scrapingSlug === m.slug;
-                const hasScrapeUrl = !!m.scrape_url;
-                return (
-                  <button
-                    key={m.slug}
-                    onClick={() => handleScrapeOne(m.slug, m.name)}
-                    disabled={isThisScrapingAll || !hasScrapeUrl || isScrapingAll}
-                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all
-                      ${hasScrapeUrl
-                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                        : "bg-muted text-muted-foreground cursor-not-allowed"
-                      } disabled:opacity-50`}
-                    title={hasScrapeUrl ? `סרוק הנחות מ-${m.name}` : "אין כתובת סריקה"}
-                  >
-                    {isThisScrapingAll ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3 w-3" />
-                    )}
-                    {m.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* Filters toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
@@ -255,14 +157,7 @@ const DashboardPage = () => {
             <div className="py-16 text-center">
               <p className="text-4xl mb-3">🔍</p>
               <p className="text-lg font-medium text-muted-foreground">לא נמצאו הנחות</p>
-              <p className="text-sm text-muted-foreground mb-4">נסה לשנות את החיפוש או הסינון</p>
-              <button
-                onClick={handleScrapeAll}
-                disabled={isScrapingAll}
-                className="text-sm text-primary underline hover:no-underline disabled:opacity-50"
-              >
-                {isScrapingAll ? "סורק..." : "סרוק הנחות חדשות מהאתרים"}
-              </button>
+              <p className="text-sm text-muted-foreground">נסה לשנות את החיפוש או הסינון</p>
             </div>
           ) : (
             filteredDiscounts.map((discount) => (

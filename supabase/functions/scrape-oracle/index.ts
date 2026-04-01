@@ -1,9 +1,9 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RATE_LIMIT_MAX = 10; // max requests per IP per minute
 
@@ -17,12 +17,27 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Auth check: require a valid Supabase session JWT
+    // Auth check: require a valid Supabase session JWT or service_role token
     const authHeader = req.headers.get('Authorization');
-    const { data: { user } } = await supabase.auth.getUser(
-      authHeader?.replace('Bearer ', '') ?? ''
-    );
-    if (!user) {
+    const token = authHeader?.replace('Bearer ', '') ?? '';
+
+    let isAuthorized = false;
+
+    // Check if it's a valid user session
+    const { data: { user } } = await supabase.auth.getUser(token);
+    if (user) {
+      isAuthorized = true;
+    } else {
+      // Check if it's a service_role JWT (Supabase gateway already verified the signature)
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.role === 'service_role') isAuthorized = true;
+      } catch {
+        // invalid JWT format
+      }
+    }
+
+    if (!isAuthorized) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -37,14 +52,6 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Rate limit exceeded. Try again in a minute.' }),
         { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-
-    const webscrapingKey = Deno.env.get('WEBSCRAPING_AI_KEY');
-    if (!webscrapingKey) {
-      return new Response(
-        JSON.stringify({ error: 'WEBSCRAPING_AI_KEY not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -79,7 +86,7 @@ Deno.serve(async (req) => {
 
     // SSRF protection: only allow known Israeli benefit sites
     const ALLOWED_SCRAPE_HOSTS = [
-      'behatzada.mod.gov.il', 'benefits.isracard.co.il', 'cal-store.co.il',
+      'behatzada.mod.gov.il', 'benefits.isracard.co.il', 'cal-store.co.il', 'cal-online.co.il',
       'yours.co.il', 'paisplus.co.il', 'www.hever.co.il', 'max.co.il',
       'clubhub.co.il', 'hofesh.co.il', 'clalbit.co.il',
     ];
@@ -99,20 +106,20 @@ Deno.serve(async (req) => {
     }
 
     console.log(`Starting scrape for ${membership.name} at ${scrapeUrl}`);
+    console.log(`isIsracard=${['iscard','isracard','isracard-benefits'].includes(membership.slug)} slug=${membership.slug}`);
 
-    // ─── Isracard: WebScraping.ai with residential Israeli IP + AI parsing ───
+    // ─── Isracard: GCP VM Puppeteer-Stealth proxy ───
     // benefits.isracard.co.il geo-blocks non-Israeli IPs AND has Cloudflare protection.
-    // WebScraping.ai routes through residential Israeli IPs which bypass both.
+    // The GCP VM (Israeli IP) with Puppeteer-Stealth bypasses both — no credit limits.
     const isIsracard = ['iscard', 'isracard', 'isracard-benefits'].includes(membership.slug);
     if (isIsracard) {
       const israUrls = [
         'https://benefits.isracard.co.il/parentcategories/online-benefits/',
         'https://benefits.isracard.co.il/parentcategories/cinema/',
-        'https://benefits.isracard.co.il/parentcategories/art/',
-        'https://benefits.isracard.co.il/parentcategories/parents/',
-        'https://benefits.isracard.co.il/parentcategories/attractions/',
       ];
-      console.log('Isracard detected — scraping multiple pages with WebScraping.ai residential IL proxy');
+      const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
+      const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+      console.log('Isracard detected — scraping multiple pages via GCP Puppeteer-Stealth proxy');
 
       try {
         const allDiscounts: any[] = [];
@@ -120,21 +127,13 @@ Deno.serve(async (req) => {
 
         for (const israUrl of israUrls) {
           console.log(`Scraping Isracard page: ${israUrl}`);
-          const params = new URLSearchParams({
-            api_key: webscrapingKey,
-            url: israUrl,
-            country: 'il',
-            render_js: '1',
-            proxy: 'residential',
-            timeout: '45000',
-            wait: '5000',
+          const proxyParams = new URLSearchParams({ key: calProxyKey, url: israUrl });
+
+          const wsRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
+            signal: AbortSignal.timeout(25000),
           });
 
-          const wsRes = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
-            signal: AbortSignal.timeout(55000),
-          });
-
-          console.log(`WebScraping.ai status for ${israUrl}: ${wsRes.status}`);
+          console.log(`GCP proxy status for ${israUrl}: ${wsRes.status}`);
 
           if (!wsRes.ok) {
             console.error(`Failed to fetch ${israUrl}: HTTP ${wsRes.status}`);
@@ -354,25 +353,24 @@ Deno.serve(async (req) => {
           const batchResults = await Promise.all(
             batch.map(async ({ url, category }) => {
               console.log(`Scraping Yours page: ${url}`);
-              const params = new URLSearchParams({
-                api_key: webscrapingKey,
-                url,
-                country: 'il',
-                render_js: '1',
-                proxy: 'residential',
-                timeout: '45000',
-                wait: '3000',
-              });
               try {
-                const res = await fetch(`https://api.webscraping.ai/html?${params.toString()}`, {
+                const fcRes = await fetch('https://api.firecrawl.dev/v1/scrape', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url, formats: ['html'], location: { country: 'IL', languages: ['he'] }, waitFor: 3000 }),
                   signal: AbortSignal.timeout(55000),
                 });
-                if (!res.ok) {
-                  console.error(`Failed ${url}: HTTP ${res.status}`);
-                  return { url, category, status: `http-${res.status}`, htmlLength: 0, discounts: [] };
+                if (!fcRes.ok) {
+                  console.error(`Failed ${url}: HTTP ${fcRes.status}`);
+                  return { url, category, status: `http-${fcRes.status}`, htmlLength: 0, discounts: [] };
                 }
-                const html = await res.text();
+                const fcData = await fcRes.json();
+                const html = fcData.data?.html || fcData.html || '';
                 console.log(`Got ${html.length} chars from ${url}`);
+                if (html.length < 1000) {
+                  console.error(`HTML too short for ${url} — skipping`);
+                  return { url, category, status: 'too-short', htmlLength: html.length, discounts: [] };
+                }
                 const discounts = extractYoursBenefits(html, category);
                 console.log(`Extracted ${discounts.length} from ${url}`);
                 return { url, category, status: 'ok', htmlLength: html.length, discounts };
@@ -574,19 +572,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Try WebScraping.ai first, then Firecrawl as fallback
-    let html = await fetchWithWebScrapingAI(webscrapingKey, scrapeUrl);
-    let strategy = 'webscraping.ai';
-
-    if (!html) {
-      // Fallback: try Firecrawl
-      const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
-      if (firecrawlKey) {
-        console.log('Falling back to Firecrawl...');
-        html = await fetchWithFirecrawl(firecrawlKey, scrapeUrl);
-        strategy = 'firecrawl';
-      }
-    }
+    // Firecrawl
+    let html = firecrawlKey ? await fetchWithFirecrawl(firecrawlKey, scrapeUrl) : null;
+    let strategy = 'firecrawl';
 
     if (!html) {
       return new Response(
@@ -652,49 +640,7 @@ Deno.serve(async (req) => {
   }
 });
 
-// ─── WebScraping.ai (Israeli residential proxy) ───
-
-async function fetchWithWebScrapingAI(apiKey: string, targetUrl: string): Promise<string | null> {
-  try {
-    const params = new URLSearchParams({
-      api_key: apiKey,
-      url: targetUrl,
-      country: 'il',
-      render_js: '1',
-      proxy: 'residential',
-      timeout: '45000',
-    });
-
-    console.log('Trying WebScraping.ai /html with residential IL proxy...');
-    const response = await fetch(`https://api.webscraping.ai/html?${params.toString()}`);
-    console.log(`WebScraping.ai status: ${response.status}`);
-
-    if (response.ok) {
-      const text = await response.text();
-      console.log(`WebScraping.ai returned ${text.length} chars`);
-      return text;
-    }
-
-    const errText = await response.text();
-    console.error(`WebScraping.ai error [${response.status}]: ${errText.substring(0, 500)}`);
-
-    // Retry without JS rendering on timeout
-    if (response.status === 504 || response.status === 408) {
-      console.log('Retrying without JS rendering...');
-      params.set('render_js', '0');
-      const retry = await fetch(`https://api.webscraping.ai/html?${params.toString()}`);
-      if (retry.ok) return await retry.text();
-      console.error(`Retry failed [${retry.status}]`);
-    }
-
-    return null;
-  } catch (err) {
-    console.error('WebScraping.ai error:', err);
-    return null;
-  }
-}
-
-// ─── Firecrawl fallback ───
+// ─── Firecrawl ───
 
 async function fetchWithFirecrawl(apiKey: string, url: string, waitForMs = 5000, onlyMainContent = true): Promise<string | null> {
   try {
