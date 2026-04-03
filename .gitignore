@@ -24,4 +24,12 @@ dist-ssr
 *.sw?
 
 # Claude internal files
-.claude/worktrees/
+.claude/
+supabase/.temp/
+
+# SSH keys
+*.key
+*.key.pub
+
+# Personal notes
+*.txt
