@@ -56,14 +56,6 @@ Deno.serve(async (req) => {
     }
 
     const geminiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!geminiKey) {
-      return new Response(
-        JSON.stringify({ error: 'GEMINI_API_KEY not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
 
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
@@ -153,7 +145,7 @@ Deno.serve(async (req) => {
           console.log(`Direct extraction from ${israUrl}: ${pageDiscounts.length} discounts`);
 
           // AI fallback
-          if (pageDiscounts.length === 0) {
+          if (pageDiscounts.length === 0 && geminiKey) {
             console.log(`Direct got 0 for ${israUrl}, falling back to AI...`);
             pageDiscounts = await parseHtmlWithAI(geminiKey, html, membership);
             console.log(`AI extracted ${pageDiscounts.length} discounts from ${israUrl}`);
@@ -354,18 +346,19 @@ Deno.serve(async (req) => {
             batch.map(async ({ url, category }) => {
               console.log(`Scraping Yours page: ${url}`);
               try {
-                const fcRes = await fetch('https://api.firecrawl.dev/v1/scrape', {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url, formats: ['html'], location: { country: 'IL', languages: ['he'] }, waitFor: 3000 }),
-                  signal: AbortSignal.timeout(55000),
+                const fetchRes = await fetch(url, {
+                  headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'he-IL,he;q=0.9',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                  },
+                  signal: AbortSignal.timeout(30000),
                 });
-                if (!fcRes.ok) {
-                  console.error(`Failed ${url}: HTTP ${fcRes.status}`);
-                  return { url, category, status: `http-${fcRes.status}`, htmlLength: 0, discounts: [] };
+                if (!fetchRes.ok) {
+                  console.error(`Failed ${url}: HTTP ${fetchRes.status}`);
+                  return { url, category, status: `http-${fetchRes.status}`, htmlLength: 0, discounts: [] };
                 }
-                const fcData = await fcRes.json();
-                const html = fcData.data?.html || fcData.html || '';
+                const html = await fetchRes.text();
                 console.log(`Got ${html.length} chars from ${url}`);
                 if (html.length < 1000) {
                   console.error(`HTML too short for ${url} — skipping`);
@@ -484,22 +477,21 @@ Deno.serve(async (req) => {
         for (let i = 0; i < paisPlusUrls.length; i += batchSize) {
           const batch = paisPlusUrls.slice(i, i + batchSize);
           console.log(`Batch ${Math.floor(i / batchSize) + 1}: fetching ${batch.length} PaisPlus pages`);
+          // PaisPlus geo-blocks non-Israeli IPs — route through GCP VM proxy (Israeli IP)
+          const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
+          const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
           const batchResults = await Promise.all(
             batch.map(async ({ url, category }) => {
               try {
-                // Firecrawl with IL location — bypasses IP block, returns HTML for regex extractor
-                const fcRes = await fetch('https://api.firecrawl.dev/v1/scrape', {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url, formats: ['markdown'], location: { country: 'IL', languages: ['he'] }, waitFor: 4000 }),
-                  signal: AbortSignal.timeout(40000),
+                const proxyParams = new URLSearchParams({ key: calProxyKey, url });
+                const proxyRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
+                  signal: AbortSignal.timeout(60000),
                 });
-                if (!fcRes.ok) {
-                  console.error(`Firecrawl failed ${url}: HTTP ${fcRes.status}`);
-                  return { url, category, status: `http-${fcRes.status}`, htmlLength: 0, discounts: [] };
+                if (!proxyRes.ok) {
+                  console.error(`GCP proxy failed ${url}: HTTP ${proxyRes.status}`);
+                  return { url, category, status: `http-${proxyRes.status}`, htmlLength: 0, discounts: [] };
                 }
-                const fcData = await fcRes.json();
-                const html = fcData.data?.markdown || fcData.markdown || '';
+                const html = await proxyRes.text();
                 console.log(`Got ${html.length} chars from ${url}`);
                 if (html.length < 1000) {
                   console.error(`HTML too short for ${url} — skipping`);
@@ -572,64 +564,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Firecrawl
-    let html = firecrawlKey ? await fetchWithFirecrawl(firecrawlKey, scrapeUrl) : null;
-    let strategy = 'firecrawl';
-
-    if (!html) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch page (all strategies failed)' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log(`Got content via ${strategy}: ${Math.round(html.length / 1024)}KB`);
-
-    const discounts = await parseHtmlWithAI(geminiKey, html, membership);
-    console.log(`Extracted ${discounts.length} discounts`);
-
-    if (discounts.length > 0) {
-      await supabase
-        .from('discounts')
-        .update({ is_active: false })
-        .eq('membership_id', membership.id)
-        .not('scraped_at', 'is', null);
-
-      const { error: insertError } = await supabase
-        .from('discounts')
-        .insert(
-          discounts.map((d: any) => ({
-            brand: d.brand || 'לא ידוע',
-            title: d.title || '',
-            description: d.description || null,
-            discount_value: d.discount_value || '',
-            category: d.category || 'כללי',
-            location: d.location || 'כל הארץ',
-            redeem_url: d.redeem_url || scrapeUrl,
-            membership_id: membership.id,
-            scraped_at: new Date().toISOString(),
-            is_active: true,
-          }))
-        );
-
-      if (insertError) {
-        console.error('Insert error:', insertError);
-        return new Response(
-          JSON.stringify({ success: false, error: insertError.message, discountsFound: discounts.length }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
     return new Response(
-      JSON.stringify({
-        success: true,
-        membership: membership.name,
-        discountsFound: discounts.length,
-        strategy,
-        htmlSize: `${Math.round(html.length / 1024)}KB`,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ success: false, error: `Membership '${membership.slug}' is not supported for scraping` }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
     console.error('Scrape error:', error);
@@ -639,42 +576,6 @@ Deno.serve(async (req) => {
     );
   }
 });
-
-// ─── Firecrawl ───
-
-async function fetchWithFirecrawl(apiKey: string, url: string, waitForMs = 5000, onlyMainContent = true): Promise<string | null> {
-  try {
-    console.log(`Firecrawl scraping ${url} (waitFor: ${waitForMs}ms)`);
-    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        formats: ['markdown'],
-        onlyMainContent,
-        waitFor: waitForMs,
-        location: { country: 'IL', languages: ['he'] },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`Firecrawl error [${response.status}]: ${errText.substring(0, 300)}`);
-      return null;
-    }
-
-    const data = await response.json();
-    const markdown = data.data?.markdown || data.markdown || null;
-    if (markdown) console.log(`Firecrawl returned ${markdown.length} chars`);
-    return markdown;
-  } catch (err) {
-    console.error('Firecrawl error:', err);
-    return null;
-  }
-}
 
 // ─── HTML Cleaner — strips scripts/styles/head to expose actual content ───
 
@@ -837,96 +738,141 @@ function extractCalBenefits(html: string, baseUrl: string): any[] {
 }
 
 // ─── Yours (שלך) direct extractor ───
-// Card structure: <a class="card-item" href="/product/ID">
-//   <img class="card-img" src="URL">
-//   <h3 class="card-title">TITLE</h3>
-//   <p class="card-sub-title"><p>BRAND</p></p>
-//   <div class="card-price">החל מ- 49 ₪</div>
+// yours.co.il uses SSR — product data is embedded as JSON in <script> tags.
+// Objects have fields: id, title, business_name, is_giveaway, price, image, etc.
 
 function extractYoursBenefits(html: string, category: string): any[] {
   const discounts: any[] = [];
   const seen = new Set<string>();
   const base = 'https://yours.co.il';
+  let items: any[] = [];
 
-  const blockRegex = /<a[^>]+class="card-item[^"]*"[^>]+href="(\/product\/\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  // Strategy 1: window.__PRELOADED_STATE__ = {...} — yours.co.il SSR pattern
+  // Products live at state.dataApi.products
+  const preloadedIdx = html.indexOf('window.__PRELOADED_STATE__');
+  if (preloadedIdx !== -1) {
+    const jsonStart = html.indexOf('{', preloadedIdx);
+    if (jsonStart !== -1) {
+      let depth = 0, jsonEnd = jsonStart;
+      for (let i = jsonStart; i < html.length; i++) {
+        if (html[i] === '{') depth++;
+        else if (html[i] === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
+      }
+      try {
+        const state = JSON.parse(html.substring(jsonStart, jsonEnd + 1));
+        const products = state?.dataApi?.products || state?.data?.products || [];
+        if (Array.isArray(products) && products.length > 0 && products[0]?.product_id !== undefined) {
+          items = products;
+          console.log(`Yours __PRELOADED_STATE__: found ${items.length} products`);
+        } else {
+          console.log('Yours __PRELOADED_STATE__: no products, top-level keys:', JSON.stringify(Object.keys(state?.dataApi || state || {})).substring(0, 200));
+        }
+      } catch (e) { console.log('Yours __PRELOADED_STATE__ parse failed:', String(e).substring(0, 150)); }
+    }
+  } else {
+    console.log('Yours: window.__PRELOADED_STATE__ not found in HTML');
+  }
+
+  // Strategy 2: fallback — search all "products":[ occurrences for a valid product array
+  if (items.length === 0) {
+    let pos = 0;
+    while (pos < html.length) {
+      const found = html.indexOf('"products":[', pos);
+      if (found === -1) break;
+      const arrStart = found + '"products":'.length;
+      let depth = 0, arrEnd = arrStart;
+      for (let i = arrStart; i < html.length; i++) {
+        if (html[i] === '[' || html[i] === '{') depth++;
+        else if (html[i] === ']' || html[i] === '}') { depth--; if (depth === 0) { arrEnd = i; break; } }
+      }
+      try {
+        const parsed = JSON.parse(html.substring(arrStart, arrEnd + 1));
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.product_id !== undefined) {
+          items = parsed;
+          console.log(`Yours Strategy 2: found ${items.length} products via "products" key`);
+          break;
+        }
+      } catch { /* skip */ }
+      pos = found + 1;
+    }
+    if (items.length === 0) console.log('Yours Strategy 2: no products array found');
+  }
+
+  console.log(`Yours: processing ${items.length} total items`);
+  for (const item of items) {
+    if (!item?.name) continue;
+    const title = String(item.name).trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    const brand = item.business_name ? String(item.business_name).trim() : 'שלך';
+    const productId = item.product_id || item.id || '';
+    const redeemUrl = productId ? `${base}/product/${productId}` : base;
+    const imgUrl = item.images?.[0]?.image_url || item.image || item.image_url || null;
+    const description = item.short_description
+      ? String(item.short_description).replace(/<[^>]+>/g, '').trim() : null;
+
+    let discount_value = 'הטבה';
+    if (item.category_page_price_type_name) discount_value = String(item.category_page_price_type_name).trim();
+
+    discounts.push({ brand, brand_logo_url: imgUrl, title, description, discount_value, category, redeem_url: redeemUrl });
+  }
+
+  return discounts;
+}
+
+// ─── PaisPlus (פיס פלוס) direct extractor — parses HTML card items ───
+// Card structure: <a class="card-item regular category-page" href="/product/ID">
+//   <img class="card-img" src="URL">
+//   <h3 class="card-title">BRAND - TITLE</h3>
+//   <p class="card-sub-title">LOCATION</p>
+//   <div class="price-text">החל מ-</div><div class="price-number">52 ₪</div>
+function extractPaisPlusBenefits(html: string, category: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+
+  const blockRegex = /<a[^>]+class="[^"]*card-item[^"]*"[^>]+href="(\/product\/\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = blockRegex.exec(html)) !== null) {
     const href = match[1];
     const inner = match[2];
 
-    const titleMatch = inner.match(/<h3[^>]+class="card-title"[^>]*>([\s\S]*?)<\/h3>/i);
+    const titleMatch = inner.match(/<h3[^>]+class="[^"]*card-title[^"]*"[^>]*>([\s\S]*?)<\/h3>/i);
     if (!titleMatch) continue;
-    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-    if (!title || seen.has(title)) continue;
-    seen.add(title);
+    const rawTitle = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (!rawTitle || seen.has(rawTitle)) continue;
+    seen.add(rawTitle);
 
-    const brandMatch = inner.match(/class="card-sub-title"[^>]*>\s*<p>([\s\S]*?)<\/p>/i);
-    const brand = brandMatch ? brandMatch[1].replace(/<[^>]+>/g, '').trim() : 'שלך';
-
-    const imgMatch = inner.match(/src="([^"]+)"[^>]*class="card-img"/i) || inner.match(/class="card-img"[^>]*src="([^"]+)"/i);
-    const brand_logo_url = imgMatch ? imgMatch[1] : null;
-
-    const priceMatch = inner.match(/class="card-price"[^>]*>([\s\S]*?)<\/div>/i);
-    let discount_value = 'הטבה';
-    if (priceMatch) {
-      discount_value = priceMatch[1].replace(/<[^>]+>/g, '').replace(/\u200F/g, '').replace(/&nbsp;/g, ' ').trim() || 'הטבה';
+    // Brand and title: "BRAND - TITLE" format
+    let brand = 'פיס פלוס';
+    let title = rawTitle;
+    const dashIdx = rawTitle.indexOf(' - ');
+    if (dashIdx > 0) {
+      brand = rawTitle.substring(0, dashIdx).trim();
+      title = rawTitle.substring(dashIdx + 3).trim() || rawTitle;
+    } else {
+      const prepBrand = rawTitle.match(/(?:לרשת ואתר|לרשת|לאתר)\s+(.+?)$/);
+      const englishBrand = rawTitle.match(/\b([A-Z][A-Za-z &]{1,30})\b/);
+      if (prepBrand) brand = prepBrand[1].trim();
+      else if (englishBrand) brand = englishBrand[1].trim();
     }
 
-    discounts.push({ brand, brand_logo_url, title, discount_value, category, redeem_url: `${base}${href}` });
-  }
-
-  return discounts;
-}
-
-// ─── PaisPlus (פיס פלוס) direct extractor ───
-// Card structure: <a class="card-item regular category-page" href="/product/ID">
-//   <img class="card-img" src="URL">
-//   <h3 class="card-title">BRAND - TITLE</h3>
-//   <p class="card-sub-title">LOCATION</p>
-//   <div class="price-text">החל מ-</div><div class="price-number">52 ₪</div>
-
-// Parses Firecrawl markdown output for paisplus.co.il
-// Each card in markdown: [![TITLE](IMG_URL)\\\n\\\n**TITLE** \\\n\\\nBRAND \\\n\\\nהחל מ-\\\n\\\nPRICE ₪\\\n\\\nלרכישה](https://paisplus.co.il/product/ID)
-function extractPaisPlusBenefits(markdown: string, category: string): any[] {
-  const discounts: any[] = [];
-  const seen = new Set<string>();
-
-  // Match each markdown link block that points to a product URL
-  const blockRegex = /\[([\s\S]*?)\]\(https:\/\/paisplus\.co\.il(\/product\/\d+)\)/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = blockRegex.exec(markdown)) !== null) {
-    const content = match[1];
-    const path = match[2];
-
-    // Must have a bold title — skip nav/menu links
-    const titleMatch = content.match(/\*\*([^*]+)\*\*/);
-    if (!titleMatch) continue;
-    const title = titleMatch[1].trim();
-    if (!title || seen.has(title)) continue;
-    seen.add(title);
-
-    // Image URL
-    const imgMatch = content.match(/!\[[^\]]*\]\(([^)]+)\)/);
+    const imgMatch = inner.match(/src="([^"]+)"[^>]*class="[^"]*card-img[^"]*"/i) ||
+                     inner.match(/class="[^"]*card-img[^"]*"[^>]*src="([^"]+)"/i);
     const brand_logo_url = imgMatch ? imgMatch[1] : null;
 
-    // Member price: ₪ amount that appears AFTER "החל מ-" (not the face value in title)
-    const memberPriceMatch = content.match(/החל מ-[\s\S]*?([\d,]+)\s*₪/);
-    const memberPrice = memberPriceMatch ? memberPriceMatch[1] : null;
-    const discount_value = memberPrice ? `החל מ- ${memberPrice} ₪` : 'הטבה';
+    const priceMatch = inner.match(/class="[^"]*price-number[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    let discount_value = 'הטבה';
+    if (priceMatch) {
+      const priceText = priceMatch[1].replace(/<[^>]+>/g, '').trim();
+      if (priceText) discount_value = `החל מ- ${priceText}`;
+    }
 
-    // Full title includes member price for clarity
-    const fullTitle = memberPrice ? `${title} ב-${memberPrice} ₪` : title;
+    const locationMatch = inner.match(/<p[^>]+class="[^"]*card-sub-title[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
+    const location = locationMatch ? locationMatch[1].replace(/<[^>]+>/g, '').trim() : 'כל הארץ';
 
-    // Brand: extract from title text — prefer English brand or text after "לרשת ואתר"/"לרשת"/"לאתר"
-    let brand = 'פיס פלוס';
-    const prepBrand = title.match(/(?:לרשת ואתר|לרשת|לאתר)\s+(.+?)$/);
-    const englishBrand = title.match(/\b([A-Z][A-Za-z &]{1,30})\b/);
-    if (prepBrand) brand = prepBrand[1].trim();
-    else if (englishBrand) brand = englishBrand[1].trim();
-
-    discounts.push({ brand, brand_logo_url, title: fullTitle, discount_value, category, location: 'כל הארץ', redeem_url: `https://paisplus.co.il${path}` });
+    discounts.push({ brand, brand_logo_url, title, discount_value, category, location: location || 'כל הארץ', redeem_url: `https://paisplus.co.il${href}` });
   }
 
   return discounts;
