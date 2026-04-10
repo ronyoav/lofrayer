@@ -169,6 +169,17 @@ const OnboardingPage = () => {
           />
         </div>
 
+        <Button
+          size="lg"
+          className="w-full text-lg h-14 gradient-primary text-primary-foreground mb-4"
+          onClick={handleFinish}
+          disabled={selected.length === 0}
+        >
+          {selected.length === 0
+            ? "בחר/י לפחות מנוי אחד"
+            : `המשך עם ${selected.length} מנויים`}
+        </Button>
+
         {isLoading ? (
           <div className="py-8 text-center" role="status" aria-label="טוען מנויים">
             <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" aria-hidden="true" />
@@ -214,16 +225,6 @@ const OnboardingPage = () => {
           </div>
         )}
 
-        <Button
-          size="lg"
-          className="w-full text-lg h-14 gradient-primary text-primary-foreground"
-          onClick={handleFinish}
-          disabled={selected.length === 0}
-        >
-          {selected.length === 0
-            ? "בחר/י לפחות מנוי אחד"
-            : `המשך עם ${selected.length} מנויים`}
-        </Button>
       </div>
     </div>
   );

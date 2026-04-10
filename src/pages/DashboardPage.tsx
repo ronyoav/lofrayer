@@ -11,6 +11,27 @@ import DiscountCard from "@/components/DiscountCard";
 import { useNavigate } from "react-router-dom";
 import { useDiscounts } from "@/hooks/useDiscounts";
 
+const hebrewToLatin: Record<string, string> = {
+  'א':'a','ב':'b','ג':'g','ד':'d','ה':'h','ו':'v','ז':'z','ח':'kh','ט':'t','י':'i',
+  'כ':'k','ך':'k','ל':'l','מ':'m','ם':'m','נ':'n','ן':'n','ס':'s','ע':'a','פ':'p',
+  'ף':'f','צ':'ts','ץ':'ts','ק':'k','ר':'r','ש':'sh','ת':'t',
+};
+
+function normalizeForSearch(str: string): string {
+  return str
+    .split('')
+    .map((c) => hebrewToLatin[c] ?? c)
+    .join('')
+    .toLowerCase()
+    .replace(/[aeiou]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchesSearch(text: string, normalizedQuery: string): boolean {
+  return normalizeForSearch(text).includes(normalizedQuery);
+}
+
 const DashboardPage = () => {
   const navigate = useNavigate();
   const userMemberships = getSelectedMemberships();
@@ -22,8 +43,9 @@ const DashboardPage = () => {
   const { data: discounts = [], isLoading } = useDiscounts(userMemberships);
 
   const filteredDiscounts = useMemo(() => {
+    const normalizedSearch = normalizeForSearch(search);
     return discounts.filter((d) => {
-      if (search && !d.brand.includes(search) && !d.title.includes(search))
+      if (search && !matchesSearch(d.brand, normalizedSearch) && !matchesSearch(d.title, normalizedSearch) && !matchesSearch(d.description || '', normalizedSearch))
         return false;
       if (selectedCategory !== "הכל" && d.category !== selectedCategory)
         return false;
