@@ -35,11 +35,18 @@ export function useDiscounts(membershipSlugs: string[]) {
   return useQuery({
     queryKey: ["discounts", membershipSlugs],
     queryFn: async () => {
+      // Expand poalim-wonder to include its sub-memberships (food, movies)
+      const expandedSlugs = membershipSlugs.flatMap((slug) =>
+        slug === "poalim-wonder"
+          ? ["poalim-wonder", "poalim-wonder-food", "poalim-wonder-movies"]
+          : [slug]
+      );
+
       // First get membership IDs from slugs
       const { data: memberships, error: membershipsError } = await supabase
         .from("memberships")
         .select("id, slug, name")
-        .in("slug", membershipSlugs);
+        .in("slug", expandedSlugs);
 
       if (membershipsError) throw membershipsError;
       if (!memberships || memberships.length === 0) return [];
