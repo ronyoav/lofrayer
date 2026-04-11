@@ -9,6 +9,7 @@ import {
 } from "@/lib/storage";
 import { useNavigate } from "react-router-dom";
 import { useMemberships, DbMembership } from "@/hooks/useDiscounts";
+import { MEMBERSHIP_LOGOS } from "@/data/mockData";
 
 const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
   "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
@@ -47,22 +48,29 @@ interface MembershipButtonProps {
   onToggle: (slug: string) => void;
 }
 
-const MembershipButton = ({ membership, isSelected, onToggle }: MembershipButtonProps) => (
-  <button
-    onClick={() => onToggle(membership.slug)}
-    aria-pressed={isSelected}
-    className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
-      isSelected
-        ? "bg-accent border-2 border-primary shadow-card"
-        : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-    }`}
-  >
-    <span className="text-lg">{MEMBERSHIP_EMOJIS[membership.slug] || "🏷️"}</span>
-    <span className="text-xs font-medium text-foreground leading-tight">
-      {membership.name}
-    </span>
-  </button>
-);
+const MembershipButton = ({ membership, isSelected, onToggle }: MembershipButtonProps) => {
+  const logo = MEMBERSHIP_LOGOS[membership.slug];
+  return (
+    <button
+      onClick={() => onToggle(membership.slug)}
+      aria-pressed={isSelected}
+      className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
+        isSelected
+          ? "bg-accent border-2 border-primary shadow-card"
+          : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
+      }`}
+    >
+      {logo ? (
+        <img src={logo} alt={membership.name} className="w-7 h-7 object-contain rounded-md flex-shrink-0" />
+      ) : (
+        <span className="text-lg flex-shrink-0">{MEMBERSHIP_EMOJIS[membership.slug] || "🏷️"}</span>
+      )}
+      <span className="text-xs font-medium text-foreground leading-tight">
+        {membership.name}
+      </span>
+    </button>
+  );
+};
 
 const OnboardingPage = () => {
   const navigate = useNavigate();

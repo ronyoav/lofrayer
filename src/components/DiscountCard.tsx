@@ -1,3 +1,5 @@
+import { MEMBERSHIP_LOGOS } from "@/data/mockData";
+
 const MEMBERSHIP_EMOJIS: Record<string, string> = {
   "behatzada": "🎖️", "hever": "🤝", "idf-disabled": "🎗️", "police": "👮",
   "bank-hapoalim": "🏦", "bank-leumi": "🏦", "bank-discount": "🏦",
@@ -38,6 +40,7 @@ interface DiscountCardProps {
 
 const DiscountCard = ({ discount }: DiscountCardProps) => {
   const membershipEmoji = MEMBERSHIP_EMOJIS[discount.membershipId] || "🏷️";
+  const membershipLogo = discount.membershipLogoUrl || MEMBERSHIP_LOGOS[discount.membershipId] || null;
 
   return (
     <a
@@ -64,15 +67,15 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
           </div>
           {/* Membership badge — bottom-right corner of brand logo */}
           <div
-            className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-card border-2 border-background flex items-center justify-center shadow-sm"
+            className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-card border-2 border-background flex items-center justify-center shadow-sm overflow-hidden"
             title={discount.membershipName}
             aria-label={`מנוי: ${discount.membershipName}`}
           >
-            {discount.membershipLogoUrl ? (
+            {membershipLogo ? (
               <img
-                src={discount.membershipLogoUrl}
+                src={membershipLogo}
                 alt={discount.membershipName}
-                className="w-4 h-4 object-contain rounded-full"
+                className="w-5 h-5 object-contain"
               />
             ) : (
               <span className="text-[10px] leading-none">{membershipEmoji}</span>
@@ -98,7 +101,11 @@ const DiscountCard = ({ discount }: DiscountCardProps) => {
           )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5">
-              <span aria-hidden="true">{membershipEmoji}</span>
+              {membershipLogo ? (
+                <img src={membershipLogo} alt="" aria-hidden="true" className="w-3.5 h-3.5 object-contain" />
+              ) : (
+                <span aria-hidden="true">{membershipEmoji}</span>
+              )}
               {discount.membershipName}
             </span>
             {discount.location && (

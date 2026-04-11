@@ -1,3 +1,24 @@
+import poalimWonderLogo from "@/assets/memberships/poalim-wonder.webp";
+import calLogo from "@/assets/memberships/cal.png";
+import maxLogo from "@/assets/memberships/max.png";
+import behatzadaLogo from "@/assets/memberships/behatzada.jpg";
+import isracard_logo from "@/assets/memberships/isracard.jpg";
+import paisLogo from "@/assets/memberships/pais.png";
+import yoursLogo from "@/assets/memberships/yours.jpg";
+
+export const MEMBERSHIP_LOGOS: Record<string, string> = {
+  "poalim-wonder": poalimWonderLogo,
+  "poalim-wonder-food": poalimWonderLogo,
+  "poalim-wonder-movies": poalimWonderLogo,
+  "cal": calLogo,
+  "max": maxLogo,
+  "behatzada": behatzadaLogo,
+  "isracard": isracard_logo,
+  "pais": paisLogo,
+  "pais-plus": paisLogo,
+  "yours": yoursLogo,
+};
+
 import nikeLogo from "@/assets/brands/nike.png";
 import castroLogo from "@/assets/brands/castro.png";
 import superpharmLogo from "@/assets/brands/superpharm.png";

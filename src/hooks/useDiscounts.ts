@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { BRAND_LOGOS } from "@/data/mockData";
+import { BRAND_LOGOS, MEMBERSHIP_LOGOS } from "@/data/mockData";
 
 export type DbDiscount = {
   id: string;
@@ -74,7 +74,7 @@ export function useDiscounts(membershipSlugs: string[]) {
           const name = membershipMap[d.membership_id]?.name || "";
           return name.startsWith('פועלים Wonder') ? 'פועלים Wonder' : name;
         })(),
-        membershipLogoUrl: membershipMap[d.membership_id]?.logo_url || null,
+        membershipLogoUrl: MEMBERSHIP_LOGOS[membershipMap[d.membership_id]?.slug || ""] || membershipMap[d.membership_id]?.logo_url || null,
       }));
     },
     enabled: membershipSlugs.length > 0,
