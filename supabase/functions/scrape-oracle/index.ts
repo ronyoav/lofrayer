@@ -74,13 +74,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    const scrapeUrl = membership.scrape_url || 'https://behatzada.mod.gov.il/benefits';
+    const scrapeUrl = membership.scrape_url || 'https://www.behatsdaa.org.il/';
 
     // SSRF protection: only allow known Israeli benefit sites
     const ALLOWED_SCRAPE_HOSTS = [
-      'behatzada.mod.gov.il', 'benefits.isracard.co.il', 'cal-store.co.il', 'cal-online.co.il',
-      'yours.co.il', 'paisplus.co.il', 'www.hever.co.il', 'max.co.il',
-      'clubhub.co.il', 'hofesh.co.il', 'clalbit.co.il',
+      'behatzada.mod.gov.il', 'www.behatsdaa.org.il', 'benefits.isracard.co.il', 'cal-store.co.il', 'cal-online.co.il',
+      'yours.co.il', 'paisplus.co.il', 'www.hever.co.il', 'max.co.il', 'www.max.co.il',
+      'clubhub.co.il', 'hofesh.co.il', 'clalbit.co.il', 'www.bankhapoalim.co.il',
     ];
     try {
       const scrapeHost = new URL(scrapeUrl).hostname;
@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
           const proxyParams = new URLSearchParams({ key: calProxyKey, url: israUrl });
 
           const wsRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
-            signal: AbortSignal.timeout(25000),
+            signal: AbortSignal.timeout(55000),
           });
 
           console.log(`GCP proxy status for ${israUrl}: ${wsRes.status}`);
@@ -564,8 +564,170 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── Max: GCP VM proxy → Puppeteer render → HTML card parser ───
+    // max.co.il is an Angular SPA — benefits only render after JS execution.
+    // The GCP VM proxy (Puppeteer) renders the page and returns full HTML.
+    const isMax = membership.slug === 'max' || membership.scrape_url?.includes('max.co.il');
+    if (isMax) {
+      const maxUrls = [
+        { url: 'https://www.max.co.il/benefits/movies',      category: 'בידור' },
+        { url: 'https://www.max.co.il/benefits/paybacksites', category: 'קניות אונליין' },
+        { url: 'https://www.max.co.il/benefits/tastytreat',  category: 'מזון' },
+      ];
+      const urlsToScrape = testMode ? maxUrls.slice(0, 1) : maxUrls;
+      console.log(`Max mode: ${testMode ? 'TEST (1 page)' : 'FULL (3 pages)'}`);
+
+      const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
+      const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+
+      try {
+        const allDiscounts: any[] = [];
+        const seenTitles = new Set<string>();
+
+        for (const { url, category } of urlsToScrape) {
+          console.log(`Scraping Max page: ${url}`);
+          const proxyParams = new URLSearchParams({ key: calProxyKey, url });
+          try {
+            const proxyRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
+              signal: AbortSignal.timeout(60000),
+            });
+            if (!proxyRes.ok) {
+              console.error(`GCP proxy failed ${url}: HTTP ${proxyRes.status}`);
+              continue;
+            }
+            const html = await proxyRes.text();
+            console.log(`Got ${html.length} chars from ${url}`);
+            if (html.length < 1000) { console.error(`HTML too short — skipping`); continue; }
+
+            const pageDiscounts = extractMaxBenefits(html, category);
+            console.log(`Extracted ${pageDiscounts.length} from ${url}`);
+            for (const d of pageDiscounts) {
+              if (!seenTitles.has(d.title)) {
+                seenTitles.add(d.title);
+                allDiscounts.push(d);
+              }
+            }
+          } catch (err: any) {
+            console.error(`Error fetching ${url}: ${err.message}`);
+          }
+        }
+
+        console.log(`Total Max discounts: ${allDiscounts.length}`);
+
+        if (allDiscounts.length === 0) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'No discounts extracted from Max pages' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        await supabase.from('discounts').update({ is_active: false })
+          .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+        const { error: insertError } = await supabase.from('discounts').insert(
+          allDiscounts.map((d: any) => ({
+            brand: d.brand || 'מקס',
+            brand_logo_url: d.brand_logo_url || null,
+            title: d.title || '',
+            description: null,
+            discount_value: d.discount_value || 'הטבה',
+            category: d.category || 'כללי',
+            location: 'כל הארץ',
+            redeem_url: d.redeem_url || 'https://www.max.co.il/benefits',
+            membership_id: membership.id,
+            scraped_at: new Date().toISOString(),
+            is_active: true,
+          }))
+        );
+        if (insertError) {
+          console.error('Insert error:', insertError);
+          return new Response(
+            JSON.stringify({ success: false, error: insertError.message, discountsFound: allDiscounts.length }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'gcp-proxy+html-parser', pages: urlsToScrape.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('Max scrape error:', errMsg);
+        return new Response(
+          JSON.stringify({ success: false, error: `Max exception: ${errMsg}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // ─── Poalim Wonder: direct fetch + HTML parser ───
+    // Card structure: <div class="team-member">
+    //   <img class="team-member-img" src="URL">
+    //   <div class="team-member-title">BRAND</div>
+    //   <div class="team-member-subtitle">שובר בשווי X₪\nתמורת Y₪ + Z נקודות</div>
+    const isPoalimWonder = membership.slug.startsWith('poalim-wonder');
+    if (isPoalimWonder) {
+      console.log(`Poalim Wonder: fetching ${scrapeUrl}`);
+      try {
+        const fetchRes = await fetch(scrapeUrl, {
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'he-IL,he;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
+        const html = await fetchRes.text();
+        console.log(`Poalim Wonder: got ${html.length} chars`);
+        const poalimDiscounts = extractPoalimWonderBenefits(html, scrapeUrl);
+        console.log(`Poalim Wonder: extracted ${poalimDiscounts.length} discounts`);
+
+        if (poalimDiscounts.length === 0) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'No discounts extracted from Poalim Wonder' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        await supabase.from('discounts').update({ is_active: false })
+          .eq('membership_id', membership.id).not('scraped_at', 'is', null);
+        const { error: insertError } = await supabase.from('discounts').insert(
+          poalimDiscounts.map((d: any) => ({
+            brand: d.brand || 'פועלים Wonder',
+            brand_logo_url: d.brand_logo_url || null,
+            title: d.title || '',
+            description: null,
+            discount_value: d.discount_value || '',
+            category: d.category || 'כללי',
+            location: 'כל הארץ',
+            redeem_url: scrapeUrl,
+            membership_id: membership.id,
+            scraped_at: new Date().toISOString(),
+            is_active: true,
+          }))
+        );
+        if (insertError) {
+          return new Response(
+            JSON.stringify({ success: false, error: insertError.message }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, membership: membership.name, discountsFound: poalimDiscounts.length, strategy: 'direct-fetch+html-parser' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        return new Response(
+          JSON.stringify({ success: false, error: `Poalim Wonder exception: ${errMsg}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // No handler for this membership
     return new Response(
-      JSON.stringify({ success: false, error: `Membership '${membership.slug}' is not supported for scraping` }),
+      JSON.stringify({ error: `No scraper implemented for membership: ${membership.slug}` }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
@@ -643,6 +805,33 @@ function extractIsracardBenefits(html: string, baseUrl: string): any[] {
     }
 
     discounts.push({ brand, title, description: null, discount_value: discountValue, category, location: 'כל הארץ', redeem_url: redeemUrl });
+  }
+
+  // Second pass: cinema-style cards — <div class="category-featured-benefit" aria-label="TITLE">
+  const featuredRegex = /<div[^>]+class="[^"]*category-featured-benefit[^"]*"[^>]*aria-label="([^"]*)"[^>]*>([\s\S]*?)<div class="caption-arrow"><\/div>/gi;
+  let featuredMatch: RegExpExecArray | null;
+
+  while ((featuredMatch = featuredRegex.exec(html)) !== null) {
+    const ariaTitle = featuredMatch[1].trim();
+    const inner = featuredMatch[2];
+
+    // Prefer caption-title div, fall back to aria-label
+    const titleMatch = inner.match(/class="[^"]*caption-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : ariaTitle;
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    const brandMatch = inner.match(/class="[^"]*caption-sub-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const brand = brandMatch ? brandMatch[1].replace(/<[^>]+>/g, '').trim() : title.split('-')[0].trim();
+
+    const discountPatterns = [/עד\s*\d+%/, /\d+%/, /\d+\s*₪/, /קאשבק/, /1\+1/];
+    let discountValue = 'הטבה';
+    for (const pat of discountPatterns) {
+      const dm = title.match(pat);
+      if (dm) { discountValue = dm[0]; break; }
+    }
+
+    discounts.push({ brand, title, description: null, discount_value: discountValue, category: 'בידור', location: 'כל הארץ', redeem_url: baseUrl });
   }
 
   return discounts;
@@ -816,6 +1005,105 @@ function extractYoursBenefits(html: string, category: string): any[] {
     if (item.category_page_price_type_name) discount_value = String(item.category_page_price_type_name).trim();
 
     discounts.push({ brand, brand_logo_url: imgUrl, title, description, discount_value, category, redeem_url: redeemUrl });
+  }
+
+  return discounts;
+}
+
+// ─── Poalim Wonder extractor — parses bankhapoalim.co.il team-member cards ───
+// Card structure:
+//   <div class="team-member with-img">
+//     <img class="team-member-img" src="URL">
+//     <div class="team-member-title">BRAND</div>
+//     <div class="team-member-subtitle">שובר בשווי 250₪\nתמורת 199₪ + 25 נקודות</div>
+//   </div>
+function extractPoalimWonderBenefits(html: string, _baseUrl: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+  const base = 'https://www.bankhapoalim.co.il';
+
+  const blockRegex = /<div[^>]+class="[^"]*team-member[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(html)) !== null) {
+    const inner = match[1];
+
+    const titleMatch = inner.match(/<div[^>]+class="[^"]*team-member-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (!titleMatch) continue;
+    const brand = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (!brand || seen.has(brand)) continue;
+    seen.add(brand);
+
+    const subtitleMatch = inner.match(/<div[^>]+class="[^"]*team-member-subtitle[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const subtitleRaw = subtitleMatch ? subtitleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+    const title = subtitleRaw.split('\n')[0].trim() || brand;
+    const discount_value = subtitleRaw || 'הטבה';
+
+    const imgMatch = inner.match(/<img[^>]+class="[^"]*team-member-img[^"]*"[^>]+src="([^"]+)"/i) ||
+                     inner.match(/src="([^"]+)"[^>]+class="[^"]*team-member-img[^"]*"/i);
+    const brand_logo_url = imgMatch ? (imgMatch[1].startsWith('http') ? imgMatch[1] : `${base}${imgMatch[1]}`) : null;
+
+    // Category from brand/title text
+    let category = 'כללי';
+    const text = (brand + ' ' + title).toLowerCase();
+    if (/מסעד|אוכל|קפה|פיצ|סושי|המבורג|מזון/.test(text)) category = 'מזון';
+    else if (/קולנוע|סרט|בידור|תיאטרון/.test(text)) category = 'בידור';
+    else if (/ספא|יופי|שיער|בריאות|כושר|ספורט/.test(text)) category = 'בריאות';
+    else if (/אופנה|ביגוד|נעל|תיק/.test(text)) category = 'אופנה';
+    else if (/נסיע|טיסה|מלון|תיירות/.test(text)) category = 'תיירות';
+    else if (/קניות|שופינג|שובר/.test(text)) category = 'קניות';
+
+    discounts.push({ brand, brand_logo_url, title, discount_value, category });
+  }
+
+  return discounts;
+}
+
+// ─── Max direct extractor — parses rendered Angular benefit cards ───
+// GCP proxy renders the Angular SPA. Benefit cards have structure:
+//   <div class="sub-benfits ng-star-inserted">
+//     <img class="benfit-pic" src="URL">
+//     <div class="benfit-info">
+//       <h2>TITLE</h2>
+//       <p class="text">DISCOUNT</p>
+//     </div>
+//     <a class="benfit-link" href="/benefits/CATEGORY/SLUG"></a>
+//   </div>
+function extractMaxBenefits(html: string, category: string): any[] {
+  const discounts: any[] = [];
+  const seen = new Set<string>();
+
+  // Each card ends with <a class="benfit-link" href="..."></a> — use that as the block terminator.
+  // This avoids the nested-div problem where </div></div> matches across multiple cards.
+  const blockRegex = /<div[^>]+class="[^"]*sub-benfits[^"]*"[^>]*>([\s\S]*?)<a[^>]+class="[^"]*benfit-link[^"]*"[^>]+href="([^"]+)"[^>]*><\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(html)) !== null) {
+    const inner = match[1];
+    const href = match[2];
+
+    const titleMatch = inner.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    const discountMatch = inner.match(/<p[^>]+class="[^"]*text[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
+    const discount_value = discountMatch ? discountMatch[1].replace(/<[^>]+>/g, '').trim() : 'הטבה';
+
+    const imgMatch = inner.match(/<img[^>]+class="[^"]*benfit-pic[^"]*"[^>]+src="([^"]+)"/i);
+    const brand_logo_url = imgMatch ? imgMatch[1] : null;
+
+    const redeem_url = href.startsWith('http') ? href : `https://www.max.co.il${href}`;
+
+    // Brand: first part of title before " - " or " – ", else full title
+    let brand = title;
+    const dashIdx = title.indexOf(' - ');
+    const dashIdx2 = title.indexOf(' – ');
+    const splitIdx = dashIdx >= 0 ? dashIdx : dashIdx2;
+    if (splitIdx > 0) brand = title.substring(0, splitIdx).trim();
+
+    discounts.push({ brand, brand_logo_url, title, discount_value, category, redeem_url });
   }
 
   return discounts;

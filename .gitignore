@@ -27,9 +27,12 @@ dist-ssr
 .claude/
 supabase/.temp/
 
-# SSH keys
+# SSH keys — never commit
+keys/
 *.key
 *.key.pub
 
 # Personal notes
 *.txt
+summarize.md
+*.docx

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
-import { Search, MapPin, SlidersHorizontal, LogOut, Settings } from "lucide-react";
+import { Search, SlidersHorizontal, LogOut, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { CATEGORIES, LOCATIONS } from "@/data/mockData";
+import { CATEGORIES } from "@/data/mockData";
 import {
   getSelectedMemberships,
   setOnboardingComplete,
@@ -61,7 +61,6 @@ const DashboardPage = () => {
   const userMemberships = getSelectedMemberships();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("הכל");
-  const [selectedLocation, setSelectedLocation] = useState("כל הארץ");
   const [showFilters, setShowFilters] = useState(false);
 
   const { data: discounts = [], isLoading } = useDiscounts(userMemberships);
@@ -73,15 +72,9 @@ const DashboardPage = () => {
         return false;
       if (selectedCategory !== "הכל" && d.category !== selectedCategory)
         return false;
-      if (
-        selectedLocation !== "כל הארץ" &&
-        d.location !== selectedLocation &&
-        d.location !== "כל הארץ"
-      )
-        return false;
       return true;
     });
-  }, [search, selectedCategory, selectedLocation, discounts]);
+  }, [search, selectedCategory, discounts]);
 
   const groupedDiscounts = useMemo(() => {
     const groups: Record<string, typeof filteredDiscounts> = {};
@@ -177,28 +170,6 @@ const DashboardPage = () => {
                     }`}
                   >
                     {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                <MapPin className="inline h-3 w-3 ml-1" aria-hidden="true" />
-                מיקום
-              </p>
-              <div className="flex flex-wrap gap-2" role="group" aria-label="סינון לפי מיקום">
-                {LOCATIONS.map((loc) => (
-                  <button
-                    key={loc}
-                    onClick={() => setSelectedLocation(loc)}
-                    aria-pressed={selectedLocation === loc}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
-                      selectedLocation === loc
-                        ? "gradient-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {loc}
                   </button>
                 ))}
               </div>
