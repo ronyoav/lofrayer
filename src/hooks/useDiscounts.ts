@@ -18,6 +18,7 @@ export type DbDiscount = {
     id: string;
     slug: string;
     name: string;
+    logo_url: string | null;
   } | null;
 };
 
@@ -45,7 +46,7 @@ export function useDiscounts(membershipSlugs: string[]) {
       // First get membership IDs from slugs
       const { data: memberships, error: membershipsError } = await supabase
         .from("memberships")
-        .select("id, slug, name")
+        .select("id, slug, name, logo_url")
         .in("slug", expandedSlugs);
 
       if (membershipsError) throw membershipsError;
@@ -73,6 +74,7 @@ export function useDiscounts(membershipSlugs: string[]) {
           const name = membershipMap[d.membership_id]?.name || "";
           return name.startsWith('פועלים Wonder') ? 'פועלים Wonder' : name;
         })(),
+        membershipLogoUrl: membershipMap[d.membership_id]?.logo_url || null,
       }));
     },
     enabled: membershipSlugs.length > 0,

@@ -32,6 +32,30 @@ function matchesSearch(text: string, normalizedQuery: string): boolean {
   return normalizeForSearch(text).includes(normalizedQuery);
 }
 
+const CATEGORY_ORDER = [
+  "בידור",
+  "פנאי ומשפחה",
+  "אופנה",
+  "מזון",
+  "בריאות",
+  "קניות",
+  "קניות אונליין",
+  "שוברים",
+  "כללי",
+];
+
+const CATEGORY_ICONS: Record<string, string> = {
+  "בידור": "🎬",
+  "פנאי ומשפחה": "🎡",
+  "אופנה": "👗",
+  "מזון": "🍔",
+  "בריאות": "🏥",
+  "קניות": "🛍️",
+  "קניות אונליין": "🛒",
+  "שוברים": "🎁",
+  "כללי": "📋",
+};
+
 const DashboardPage = () => {
   const navigate = useNavigate();
   const userMemberships = getSelectedMemberships();
@@ -58,6 +82,20 @@ const DashboardPage = () => {
       return true;
     });
   }, [search, selectedCategory, selectedLocation, discounts]);
+
+  const groupedDiscounts = useMemo(() => {
+    const groups: Record<string, typeof filteredDiscounts> = {};
+    filteredDiscounts.forEach((d) => {
+      const cat = d.category || "כללי";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(d);
+    });
+    const orderedCats = CATEGORY_ORDER.filter((cat) => groups[cat]?.length > 0);
+    const extraCats = Object.keys(groups).filter((cat) => !CATEGORY_ORDER.includes(cat));
+    return [...orderedCats, ...extraCats]
+      .filter((cat) => groups[cat]?.length > 0)
+      .map((cat) => ({ category: cat, discounts: groups[cat] }));
+  }, [filteredDiscounts]);
 
   const handleReset = () => {
     setOnboardingComplete(false);
@@ -168,8 +206,8 @@ const DashboardPage = () => {
           </div>
         )}
 
-        {/* Discounts list */}
-        <div className="space-y-3 pb-8">
+        {/* Discounts grouped by category */}
+        <div className="pb-8">
           {isLoading ? (
             <div className="py-16 text-center" role="status" aria-label="טוען הנחות">
               <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" aria-hidden="true" />
@@ -182,23 +220,37 @@ const DashboardPage = () => {
               <p className="text-sm text-muted-foreground">נסה לשנות את החיפוש או הסינון</p>
             </div>
           ) : (
-            filteredDiscounts.map((discount) => (
-              <DiscountCard
-                key={discount.id}
-                discount={{
-                  id: discount.id,
-                  brand: discount.brand,
-                  brandLogo: discount.brandLogo || "",
-                  title: discount.title,
-                  description: discount.description || "",
-                  discountValue: discount.discount_value,
-                  membershipId: discount.membership?.slug || "",
-                  membershipName: discount.membershipName,
-                  category: discount.category || "",
-                  location: discount.location || undefined,
-                  redeemUrl: discount.redeem_url || "#",
-                }}
-              />
+            groupedDiscounts.map(({ category, discounts: catDiscounts }) => (
+              <div key={category} className="mb-6">
+                <div className="flex items-center gap-2 mb-3 mt-2">
+                  <span className="text-lg" aria-hidden="true">
+                    {CATEGORY_ICONS[category] || "🏷️"}
+                  </span>
+                  <h2 className="text-base font-bold text-foreground">{category}</h2>
+                  <span className="text-xs text-muted-foreground">({catDiscounts.length})</span>
+                </div>
+                <div className="space-y-3">
+                  {catDiscounts.map((discount) => (
+                    <DiscountCard
+                      key={discount.id}
+                      discount={{
+                        id: discount.id,
+                        brand: discount.brand,
+                        brandLogo: discount.brandLogo || "",
+                        title: discount.title,
+                        description: discount.description || "",
+                        discountValue: discount.discount_value,
+                        membershipId: discount.membership?.slug || "",
+                        membershipName: discount.membershipName,
+                        membershipLogoUrl: discount.membershipLogoUrl,
+                        category: discount.category || "",
+                        location: discount.location || undefined,
+                        redeemUrl: discount.redeem_url || "#",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
             ))
           )}
         </div>
