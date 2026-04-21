@@ -1,73 +1,115 @@
-# Welcome to your Lovable project
+# lofrayer 🛍️
 
-## Project info
+אגרגטור הנחות ישראלי — כל ההטבות של כל המועדונים שלך, במקום אחד.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## מה זה?
 
-## How can I edit this code?
+lofrayer מאפשר למשתמשים לבחור את המועדונים שהם חברים בהם (כרטיסי אשראי, בנקים, קופות חולים, ביטוח, הסתדרות וכו') ולראות בדיוק אילו הנחות זמינות להם — בלי לחפש ידנית בכל אתר בנפרד.
 
-There are several ways of editing your application.
+**כתובת האתר:** [lofrayer.vercel.app](https://lofrayer.vercel.app)
 
-**Use Lovable**
+---
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Stack
 
-Changes made via Lovable will be committed automatically to this repo.
+| שכבה | טכנולוגיה |
+|------|-----------|
+| Frontend | React + TypeScript + Vite |
+| UI | Tailwind CSS + shadcn/ui |
+| Backend / DB | Supabase (PostgreSQL + Edge Functions) |
+| Scraping | Puppeteer (Stealth) · Browserless · fetch ישיר |
+| Deploy | Vercel |
+| Scraper VM | GCP VM ב-`me-west1-b` (IP ישראלי) |
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## ארכיטקטורה
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+```
+משתמש → Vercel (React SPA)
+              ↓
+         Supabase DB
+              ↑
+    scrape-oracle (Edge Function)
+              ↓
+    ┌─────────────────────────────┐
+    │  GCP VM (israel-scraper-vm) │
+    │  PM2: lofrayer-proxy :3001  │
+    │  Puppeteer Stealth          │
+    └─────────────────────────────┘
+```
 
-Follow these steps:
+הסקריינפים רצים על VM ישראלי כי חלק מהאתרים (CAL, ישראכרט) חוסמים IP-ים בחו"ל. הנתונים נשמרים ב-Supabase ונמשכים לממשק ב-real-time.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+---
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## מועדונים נתמכים
 
-# Step 3: Install the necessary dependencies.
-npm i
+**כרטיסי אשראי:** כאל, MAX, ישראכרט, ויזה  
+**בנקים:** הפועלים (+ Wonder), לאומי, דיסקונט, מזרחי, יהב  
+**קופות חולים:** כללית, מכבי, לאומית, מאוחדת  
+**צבא וביטחון:** בהצדעה, חבר, משטרה  
+**הסתדרות:** הסתדרות כללית, מורים, מדינה, רפואית  
+**תקשורת:** HOT, פרטנר, סלקום, פלאפון, פז, סונול  
+**ביטוח:** מגדל, הראל, מנורה, כלל  
+**צרכנות:** פייס, ClubHub, פייס פלוס, חופש, רמי לוי, שופרסל  
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+---
+
+## אתגרים טכניים
+
+### 🛡️ חסימות Cloudflare
+ישראכרט וכאל מריצים Cloudflare עם bot-detection אגרסיבי. curl פשוט וגם Browserless רגיל נחסמים. הפתרון: Puppeteer עם `puppeteer-extra-plugin-stealth` שמסתיר fingerprints של automation.
+
+### 🌍 חסימות גיאוגרפיות
+חלק מהאתרים מחזירים תוכן שונה (או שגיאה) מ-IP חו"ל. הקמנו GCP VM באזור `me-west1-b` (תל אביב) שמשמש כ-proxy לכל הסקריינפים הרגישים. PM2 מנהל את התהליך ומבטיח restart אוטומטי.
+
+### ⏱️ networkidle2 שלא מסתיים
+ישראכרט מריץ analytics traffic רציף — `waitUntil: 'networkidle2'` לא מסתיים לעולם. הפתרון: `waitUntil: 'domcontentloaded'` + המתנה ל-selector ספציפי.
+
+### 🔍 שתי מבניות HTML שונות בישראכרט
+הטבות רגילות (אונליין) ב-`.category-item`, הטבות קולנוע ב-`.category-featured-benefit`. כל אחת דורשת extractor נפרד.
+
+### 🔑 ניהול secrets
+ה-Edge Functions של Supabase מאחסנות את כל ה-secrets (credentials לסקריינפים, URLs של ה-VM) — לא ב-`.env` ולא ב-git.
+
+---
+
+## הרצה מקומית
+
+```bash
+# התקנת dependencies
+npm install
+
+# הרצת dev server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+משתני סביבה נדרשים: מוגדרים ב-Supabase Edge Function secrets (לא נדרש `.env` לפיתוח ממשק).
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## מבנה תיקיות
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```
+src/
+  pages/
+    OnboardingPage.tsx   # בחירת מועדונים
+    DashboardPage.tsx    # דף הנחות ראשי (4 tabs)
+    AdminPage.tsx        # ניהול הנחות (requires auth)
+  components/
+    DiscountCard.tsx     # כרטיס הנחה עם לוגו מותג + badge מועדון
+  hooks/
+    useDiscounts.ts      # fetch הנחות לפי מועדונים נבחרים
+  data/
+    mockData.ts          # לוגואים מקומיים של מותגים ומועדונים
+supabase/
+  functions/
+    scrape-oracle/       # אורקסטרטור scrapers (Edge Function)
+```
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+## Deploy
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+הפרויקט מועלה אוטומטית ל-Vercel בכל push ל-`main`.
