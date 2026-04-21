@@ -1,115 +1,112 @@
 # lofrayer 🛍️
 
-אגרגטור הנחות ישראלי — כל ההטבות של כל המועדונים שלך, במקום אחד.
+An Israeli discount aggregator — all the benefits from all your membership clubs, in one place.
 
-## מה זה?
+## What it does
 
-lofrayer מאפשר למשתמשים לבחור את המועדונים שהם חברים בהם (כרטיסי אשראי, בנקים, קופות חולים, ביטוח, הסתדרות וכו') ולראות בדיוק אילו הנחות זמינות להם — בלי לחפש ידנית בכל אתר בנפרד.
+Israelis carry memberships across credit cards, banks, HMOs, unions, insurance companies, and more — each with their own discount portal. lofrayer lets users select the clubs they belong to and instantly see every discount available to them, without manually checking each site.
 
-**כתובת האתר:** [lofrayer.vercel.app](https://lofrayer.vercel.app)
+**Live:** [lofrayer.vercel.app](https://lofrayer.vercel.app)
 
 ---
 
 ## Stack
 
-| שכבה | טכנולוגיה |
-|------|-----------|
+| Layer | Technology |
+|-------|-----------|
 | Frontend | React + TypeScript + Vite |
 | UI | Tailwind CSS + shadcn/ui |
-| Backend / DB | Supabase (PostgreSQL + Edge Functions) |
-| Scraping | Puppeteer (Stealth) · Browserless · fetch ישיר |
+| Database | Supabase (PostgreSQL) |
+| Scraping | Supabase Edge Functions + Puppeteer (Stealth) + Browserless + direct fetch |
 | Deploy | Vercel |
-| Scraper VM | GCP VM ב-`me-west1-b` (IP ישראלי) |
+| Scraper infrastructure | GCP VM in `me-west1-b` (Israeli IP) |
 
 ---
 
-## ארכיטקטורה
+## Architecture
 
 ```
-משתמש → Vercel (React SPA)
-              ↓
-         Supabase DB
-              ↑
-    scrape-oracle (Edge Function)
-              ↓
-    ┌─────────────────────────────┐
-    │  GCP VM (israel-scraper-vm) │
-    │  PM2: lofrayer-proxy :3001  │
-    │  Puppeteer Stealth          │
-    └─────────────────────────────┘
+User → Vercel (React SPA)
+             ↓
+        Supabase DB
+             ↑
+   scrape-oracle (Edge Function)
+             ↓
+   ┌──────────────────────────────┐
+   │  GCP VM (israel-scraper-vm)  │
+   │  PM2: lofrayer-proxy :3001   │
+   │  Puppeteer Stealth           │
+   └──────────────────────────────┘
 ```
 
-הסקריינפים רצים על VM ישראלי כי חלק מהאתרים (CAL, ישראכרט) חוסמים IP-ים בחו"ל. הנתונים נשמרים ב-Supabase ונמשכים לממשק ב-real-time.
+Scrapers run on an Israeli GCP VM because several sites (CAL, Isracard) block non-Israeli IPs. Data is stored in Supabase and fetched client-side filtered by the user's selected memberships.
 
 ---
 
-## מועדונים נתמכים
+## Supported clubs
 
-**כרטיסי אשראי:** כאל, MAX, ישראכרט, ויזה  
-**בנקים:** הפועלים (+ Wonder), לאומי, דיסקונט, מזרחי, יהב  
-**קופות חולים:** כללית, מכבי, לאומית, מאוחדת  
-**צבא וביטחון:** בהצדעה, חבר, משטרה  
-**הסתדרות:** הסתדרות כללית, מורים, מדינה, רפואית  
-**תקשורת:** HOT, פרטנר, סלקום, פלאפון, פז, סונול  
-**ביטוח:** מגדל, הראל, מנורה, כלל  
-**צרכנות:** פייס, ClubHub, פייס פלוס, חופש, רמי לוי, שופרסל  
-
----
-
-## אתגרים טכניים
-
-### 🛡️ חסימות Cloudflare
-ישראכרט וכאל מריצים Cloudflare עם bot-detection אגרסיבי. curl פשוט וגם Browserless רגיל נחסמים. הפתרון: Puppeteer עם `puppeteer-extra-plugin-stealth` שמסתיר fingerprints של automation.
-
-### 🌍 חסימות גיאוגרפיות
-חלק מהאתרים מחזירים תוכן שונה (או שגיאה) מ-IP חו"ל. הקמנו GCP VM באזור `me-west1-b` (תל אביב) שמשמש כ-proxy לכל הסקריינפים הרגישים. PM2 מנהל את התהליך ומבטיח restart אוטומטי.
-
-### ⏱️ networkidle2 שלא מסתיים
-ישראכרט מריץ analytics traffic רציף — `waitUntil: 'networkidle2'` לא מסתיים לעולם. הפתרון: `waitUntil: 'domcontentloaded'` + המתנה ל-selector ספציפי.
-
-### 🔍 שתי מבניות HTML שונות בישראכרט
-הטבות רגילות (אונליין) ב-`.category-item`, הטבות קולנוע ב-`.category-featured-benefit`. כל אחת דורשת extractor נפרד.
-
-### 🔑 ניהול secrets
-ה-Edge Functions של Supabase מאחסנות את כל ה-secrets (credentials לסקריינפים, URLs של ה-VM) — לא ב-`.env` ולא ב-git.
+**Credit cards:** CAL, MAX, Isracard, Visa  
+**Banks:** Hapoalim (+ Wonder), Leumi, Discount, Mizrahi, Yahav  
+**HMOs:** Clalit, Maccabi, Leumit, Meuhedet  
+**Military / security:** Behatzada, Hever, Police  
+**Labor unions:** Histadrut, Teachers, Civil Service, Medical  
+**Telecom & energy:** HOT, Partner, Cellcom, Pelephone, Paz, Sonol  
+**Insurance:** Migdal, Harel, Menora, Clal  
+**Consumer clubs:** Face, ClubHub, Pais Plus, Hofesh, Rami Levy, Shufersal  
 
 ---
 
-## הרצה מקומית
+## Technical challenges
+
+### Cloudflare bot protection
+Isracard and CAL run aggressive Cloudflare bot detection. Plain curl and standard Browserless both get blocked. Fix: Puppeteer with `puppeteer-extra-plugin-stealth` to mask automation fingerprints, launched from the Israeli VM.
+
+### Geographic blocking
+Some sites return different content (or errors) from non-Israeli IPs. Solved by routing all sensitive scrapers through a GCP VM in `me-west1-b` (Tel Aviv). PM2 keeps the proxy process alive with automatic restarts.
+
+### `networkidle2` never resolving
+Isracard runs continuous analytics traffic, so `waitUntil: 'networkidle2'` hangs indefinitely. Fix: `waitUntil: 'domcontentloaded'` + waiting for a specific DOM selector instead.
+
+### Two different HTML structures on Isracard
+Regular (online) benefits are in `.category-item`; cinema benefits are in `.category-featured-benefit`. Each requires its own extractor.
+
+### Secrets management
+All scraper credentials and VM URLs live in Supabase Edge Function secrets — not in `.env`, not in git.
+
+---
+
+## Getting started
 
 ```bash
-# התקנת dependencies
 npm install
-
-# הרצת dev server
 npm run dev
 ```
 
-משתני סביבה נדרשים: מוגדרים ב-Supabase Edge Function secrets (לא נדרש `.env` לפיתוח ממשק).
+No `.env` needed for frontend development — environment variables live in Supabase Edge Function secrets.
 
 ---
 
-## מבנה תיקיות
+## Project structure
 
 ```
 src/
   pages/
-    OnboardingPage.tsx   # בחירת מועדונים
-    DashboardPage.tsx    # דף הנחות ראשי (4 tabs)
-    AdminPage.tsx        # ניהול הנחות (requires auth)
+    OnboardingPage.tsx   # membership selection flow
+    DashboardPage.tsx    # main dashboard (4 tabs: Home / Search / Wallet / Me)
+    AdminPage.tsx        # discount management (auth-gated)
   components/
-    DiscountCard.tsx     # כרטיס הנחה עם לוגו מותג + badge מועדון
+    DiscountCard.tsx     # discount card with brand logo + membership badge
   hooks/
-    useDiscounts.ts      # fetch הנחות לפי מועדונים נבחרים
+    useDiscounts.ts      # fetches discounts filtered by selected memberships
   data/
-    mockData.ts          # לוגואים מקומיים של מותגים ומועדונים
+    mockData.ts          # local brand and membership logos
 supabase/
   functions/
-    scrape-oracle/       # אורקסטרטור scrapers (Edge Function)
+    scrape-oracle/       # scraper orchestrator (Edge Function)
 ```
 
 ---
 
-## Deploy
+## Deployment
 
-הפרויקט מועלה אוטומטית ל-Vercel בכל push ל-`main`.
+Every push to `main` triggers an automatic Vercel deployment.
