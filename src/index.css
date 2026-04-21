@@ -1,33 +1,47 @@
-@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Rubik:wght@400..900&family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 @layer base {
   :root {
-    --background: 220 30% 98%;
-    --foreground: 220 20% 12%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 20% 12%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 12%;
-    --primary: 217 91% 60%;
+    /* Sunset Punch palette */
+    --lf-bg:        #FFF6E9;
+    --lf-bg-2:      #FFEAD2;
+    --lf-ink:       #1B1033;
+    --lf-ink-2:     #3E2A5B;
+    --lf-primary:   #6D28FF;
+    --lf-primary-2: #A47BFF;
+    --lf-pink:      #FF4D8F;
+    --lf-yellow:    #FFD23F;
+    --lf-mint:      #35D6A4;
+    --lf-coral:     #FF7A4D;
+    --lf-line:      rgba(27,16,51,0.13);
+
+    /* shadcn tokens — mapped to the new palette */
+    --background:   36 100% 96%;
+    --foreground:   260 50% 15%;
+    --card:         0 0% 100%;
+    --card-foreground: 260 50% 15%;
+    --popover:      0 0% 100%;
+    --popover-foreground: 260 50% 15%;
+    --primary:      262 100% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 20% 94%;
-    --secondary-foreground: 220 20% 20%;
-    --muted: 217 15% 93%;
-    --muted-foreground: 220 10% 46%;
-    --accent: 217 91% 95%;
-    --accent-foreground: 217 91% 40%;
-    --destructive: 0 84.2% 60.2%;
+    --secondary:    262 20% 94%;
+    --secondary-foreground: 260 50% 20%;
+    --muted:        262 15% 93%;
+    --muted-foreground: 260 10% 46%;
+    --accent:       262 91% 95%;
+    --accent-foreground: 262 91% 40%;
+    --destructive:  0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
-    --border: 217 15% 88%;
-    --input: 217 15% 88%;
-    --ring: 217 91% 60%;
-    --radius: 0.75rem;
-    --success: 142 71% 45%;
+    --border:       262 15% 88%;
+    --input:        262 15% 88%;
+    --ring:         262 100% 58%;
+    --radius:       1rem;
+    --success:      162 71% 45%;
     --success-foreground: 0 0% 100%;
-    --savings: 217 91% 60%;
-    --savings-light: 217 91% 95%;
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
@@ -35,31 +49,78 @@
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 262 100% 58%;
   }
 }
+
 @layer base {
   * {
     @apply border-border;
   }
   html {
     direction: rtl;
+    background: var(--lf-bg);
   }
   body {
-    @apply bg-background text-foreground font-heebo;
+    background: var(--lf-bg);
+    color: var(--lf-ink);
+    font-family: 'Rubik', 'Heebo', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    box-sizing: border-box;
+  }
+  * {
+    box-sizing: border-box;
   }
 }
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes popIn {
+  0%   { transform: scale(.7) translateY(12px); opacity: 0; }
+  70%  { transform: scale(1.04) translateY(-2px); opacity: 1; }
+  100% { transform: scale(1) translateY(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes floaty {
+  0%,100% { transform: translateY(0) rotate(0deg); }
+  50%     { transform: translateY(-8px) rotate(2deg); }
+}
+
+@keyframes shine {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.lf-pop-in   { animation: popIn  .45s cubic-bezier(.34,1.56,.64,1) both; }
+.lf-slide-up { animation: slideUp .5s  cubic-bezier(.22,1,.36,1)   both; }
+.lf-floaty   { animation: floaty  4s   ease-in-out infinite; }
+
+.lf-tap { transition: transform .15s ease, filter .15s ease; }
+.lf-tap:active { transform: scale(.97); filter: brightness(.96); }
+
+/* ── Scrollbar hide ───────────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* ── Utilities (keep existing) ────────────────────────────── */
 @layer utilities {
   .gradient-primary {
-    background: linear-gradient(135deg, hsl(217 91% 60%), hsl(210 91% 65%));
+    background: linear-gradient(135deg, var(--lf-primary), var(--lf-pink));
   }
   .gradient-hero {
-    background: linear-gradient(180deg, hsl(217 91% 95%) 0%, hsl(220 30% 98%) 100%);
+    background: var(--lf-bg);
   }
   .shadow-card {
-    box-shadow: 0 2px 12px -2px hsl(217 30% 50% / 0.1), 0 1px 4px -1px hsl(217 30% 50% / 0.06);
+    box-shadow: 0 2px 12px -2px rgba(109,40,255,0.08), 0 1px 4px -1px rgba(109,40,255,0.04);
   }
   .shadow-card-hover {
-    box-shadow: 0 8px 24px -4px hsl(217 30% 50% / 0.15), 0 2px 8px -2px hsl(217 30% 50% / 0.1);
+    box-shadow: 0 8px 24px -4px rgba(109,40,255,0.14), 0 2px 8px -2px rgba(109,40,255,0.08);
+  }
+  .font-display {
+    font-family: 'Fraunces', Georgia, serif;
   }
 }

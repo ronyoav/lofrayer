@@ -1,24 +1,19 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  setSelectedMemberships,
-  setOnboardingComplete,
-} from "@/lib/storage";
+import { setSelectedMemberships, setOnboardingComplete } from "@/lib/storage";
 import { useNavigate } from "react-router-dom";
 import { useMemberships, DbMembership } from "@/hooks/useDiscounts";
 import { MEMBERSHIP_LOGOS } from "@/data/mockData";
 
+// ── Membership categories ─────────────────────────────────────────────────────
 const MEMBERSHIP_CATEGORIES: Record<string, string[]> = {
-  "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
   "💳 כרטיסי אשראי": ["cal", "max", "iscard", "visa-cal", "isracard-benefits"],
+  "🏦 בנקים": ["bank-hapoalim", "bank-leumi", "bank-discount", "bank-mizrahi", "bank-yahav", "bank-benleumi", "poalim-wonder", "mafteah-discount"],
   "🏥 קופות חולים": ["clalit", "maccabi", "leumit", "meuhedet"],
   "🎖️ צבא וביטחון": ["behatzada", "hever", "idf-disabled", "police"],
   "✊ הסתדרויות": ["histadrut", "histadrut-morim", "histadrut-medina", "histadrut-refuit"],
+  "🛒 מועדוני צרכנות": ["face", "clubhub", "pais-plus", "hofesh", "rami-levy-club", "shufersal-club"],
   "📱 תקשורת ואנרגיה": ["hot-club", "partner", "cellcom", "pelephone", "yellow-paz", "sonol"],
   "🛡️ ביטוח": ["migdal", "harel", "menora", "clal-insurance"],
-  "🛒 מועדוני צרכנות": ["face", "clubhub", "pais-plus", "hofesh", "rami-levy-club", "shufersal-club"],
   "⚖️ לשכות מקצועיות": ["lishkat-orchei-din", "lishkat-roei-heshbon"],
 };
 
@@ -38,150 +33,351 @@ const MEMBERSHIP_EMOJIS: Record<string, string> = {
   "rami-levy-club": "🛒", "shufersal-club": "🛒",
 };
 
-// Pre-computed set of all categorized slugs — avoids recomputing on every render
 const ALL_CATEGORIZED_SLUGS = new Set(Object.values(MEMBERSHIP_CATEGORIES).flat());
 
-interface MembershipButtonProps {
-  membership: DbMembership;
-  isSelected: boolean;
-  onToggle: (slug: string) => void;
+// ── Welcome screen ────────────────────────────────────────────────────────────
+function WelcomeScreen({ onNext }: { onNext: () => void }) {
+  return (
+    <div style={{
+      minHeight: '100vh', background: 'var(--lf-bg)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      padding: '40px 28px', position: 'relative', overflow: 'hidden',
+    }}>
+      {/* Ambient glow */}
+      <div style={{
+        position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)',
+        width: 340, height: 340, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(255,210,63,0.4) 0%, transparent 70%)',
+        filter: 'blur(32px)', pointerEvents: 'none',
+      }}/>
+      {/* Floating sticker tags */}
+      <div className="lf-floaty" style={{
+        position: 'absolute', top: '12%', right: '6%',
+        background: 'var(--lf-yellow)', color: 'var(--lf-ink)',
+        padding: '8px 14px', borderRadius: 10, fontWeight: 800, fontSize: 20,
+        transform: 'rotate(12deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
+        animationDelay: '.4s',
+      }}>‑40%</div>
+      <div className="lf-floaty" style={{
+        position: 'absolute', top: '24%', left: '4%',
+        background: 'var(--lf-pink)', color: '#fff',
+        padding: '7px 12px', borderRadius: 10, fontWeight: 800, fontSize: 16,
+        transform: 'rotate(-10deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.12)',
+        animationDelay: '.8s',
+      }}>1+1</div>
+      <div className="lf-floaty" style={{
+        position: 'absolute', bottom: '28%', right: '8%',
+        background: 'var(--lf-mint)', color: 'var(--lf-ink)',
+        padding: '6px 11px', borderRadius: 10, fontWeight: 800, fontSize: 13,
+        transform: 'rotate(-6deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
+        animationDelay: '1.4s',
+      }}>חדש! 🔥</div>
+      <div className="lf-floaty" style={{
+        position: 'absolute', bottom: '34%', left: '6%',
+        background: 'var(--lf-coral)', color: '#fff',
+        padding: '6px 11px', borderRadius: 10, fontWeight: 800, fontSize: 13,
+        transform: 'rotate(8deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
+        animationDelay: '2s',
+      }}>חם 🔥</div>
+
+      {/* Wordmark */}
+      <div className="lf-slide-up" style={{ position: 'relative', zIndex: 1, textAlign: 'center', marginBottom: 20 }}>
+        <div style={{
+          fontFamily: "'Fraunces', Georgia, serif",
+          fontStyle: 'italic', fontWeight: 900, fontSize: 88,
+          lineHeight: 0.9, letterSpacing: -3,
+          background: 'linear-gradient(120deg, var(--lf-primary) 0%, var(--lf-pink) 55%, var(--lf-coral) 100%)',
+          WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+        }}>lofrayer</div>
+        <div style={{
+          display: 'inline-block', width: 14, height: 14, borderRadius: '50%',
+          background: 'var(--lf-yellow)', marginRight: 6,
+          boxShadow: '0 2px 0 rgba(0,0,0,0.08)', verticalAlign: 'top', marginTop: 4,
+        }}/>
+      </div>
+
+      <p style={{
+        fontSize: 19, color: 'var(--lf-ink-2)', fontWeight: 500,
+        textAlign: 'center', lineHeight: 1.5, maxWidth: 300, marginBottom: 48,
+        position: 'relative', zIndex: 1,
+        animation: 'slideUp .6s .15s cubic-bezier(.22,1,.36,1) both',
+      }}>
+        כל ההנחות של כל המועדונים שלך,<br/>במקום אחד. לקנייה חכמה.
+      </p>
+
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360 }}>
+        <button
+          className="lf-tap"
+          onClick={onNext}
+          style={{
+            width: '100%', padding: '18px 26px', borderRadius: 999,
+            background: 'var(--lf-ink)', color: 'var(--lf-bg)',
+            fontFamily: "'Rubik', sans-serif", fontWeight: 700, fontSize: 18,
+            boxShadow: '0 4px 0 rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.08)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            border: 'none', cursor: 'pointer',
+          }}>
+          בואו נתחיל ←
+        </button>
+      </div>
+    </div>
+  );
 }
 
-const MembershipButton = ({ membership, isSelected, onToggle }: MembershipButtonProps) => {
+// ── Club chip ─────────────────────────────────────────────────────────────────
+function ClubChip({ membership, selected, onToggle }: {
+  membership: DbMembership;
+  selected: boolean;
+  onToggle: () => void;
+}) {
   const logo = MEMBERSHIP_LOGOS[membership.slug];
+  const emoji = MEMBERSHIP_EMOJIS[membership.slug] || "🏷️";
+
   return (
     <button
-      onClick={() => onToggle(membership.slug)}
-      aria-pressed={isSelected}
-      className={`flex items-center gap-2 rounded-xl p-3 text-right transition-all duration-200 ${
-        isSelected
-          ? "bg-accent border-2 border-primary shadow-card"
-          : "bg-card border-2 border-transparent shadow-card hover:shadow-card-hover"
-      }`}
+      onClick={onToggle}
+      className="lf-tap"
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+        background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+      }}
     >
-      {logo ? (
-        <img src={logo} alt={membership.name} className="w-7 h-7 object-contain rounded-md flex-shrink-0" />
-      ) : (
-        <span className="text-lg flex-shrink-0">{MEMBERSHIP_EMOJIS[membership.slug] || "🏷️"}</span>
-      )}
-      <span className="text-xs font-medium text-foreground leading-tight">
-        {membership.name}
-      </span>
+      <div style={{
+        width: 58, height: 58, borderRadius: '50%',
+        background: selected ? 'var(--lf-ink)' : '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: selected
+          ? '0 0 0 3px var(--lf-bg), 0 0 0 5px var(--lf-ink), 0 6px 18px rgba(109,40,255,0.3)'
+          : '0 3px 10px rgba(0,0,0,0.1)',
+        transition: 'all .2s ease',
+        transform: selected ? 'scale(1.05)' : 'scale(1)',
+        overflow: 'hidden', position: 'relative', flexShrink: 0,
+      }}>
+        {logo ? (
+          <img
+            src={logo} alt={membership.name}
+            style={{
+              width: 38, height: 38, objectFit: 'contain', borderRadius: 6,
+              filter: selected ? 'brightness(0) invert(1)' : 'none',
+              transition: 'filter .2s ease',
+            }}
+          />
+        ) : (
+          <span style={{ fontSize: 22, lineHeight: 1 }}>{emoji}</span>
+        )}
+        {selected && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0,
+            width: 20, height: 20, borderRadius: '50%',
+            background: 'var(--lf-mint)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px solid var(--lf-bg)',
+          }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+              <path d="M4 12l5 5 11-12" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        )}
+      </div>
+      <div style={{
+        fontSize: 10, fontWeight: 600, textAlign: 'center',
+        color: 'var(--lf-ink)', lineHeight: 1.2, maxWidth: 64,
+      }}>{membership.name}</div>
     </button>
   );
-};
+}
 
-const OnboardingPage = () => {
-  const navigate = useNavigate();
+// ── Club selection screen ─────────────────────────────────────────────────────
+function ClubsScreen({ onComplete }: { onComplete: (clubs: string[]) => void }) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [search, setSearch] = useState("");
   const { data: memberships = [], isLoading } = useMemberships();
 
-  const filteredMemberships = useMemo(() => {
-    if (!searchQuery) return memberships;
-    return memberships.filter((m) =>
-      m.name.includes(searchQuery) || m.slug.includes(searchQuery.toLowerCase())
+  const filtered = useMemo(() => {
+    if (!search) return memberships;
+    return memberships.filter(m =>
+      m.name.includes(search) || m.slug.includes(search.toLowerCase())
     );
-  }, [memberships, searchQuery]);
+  }, [memberships, search]);
 
-  const uncategorizedMemberships = useMemo(
-    () => filteredMemberships.filter((m) => !ALL_CATEGORIZED_SLUGS.has(m.slug)),
-    [filteredMemberships]
+  const uncategorized = useMemo(
+    () => filtered.filter(m => !ALL_CATEGORIZED_SLUGS.has(m.slug)),
+    [filtered]
   );
 
-  const toggleMembership = (slug: string) => {
-    setSelected((prev) =>
-      prev.includes(slug) ? prev.filter((m) => m !== slug) : [...prev, slug]
-    );
-  };
-
-  const handleFinish = () => {
-    setSelectedMemberships(selected);
-    setOnboardingComplete(true);
-    navigate("/dashboard");
+  const toggle = (slug: string) => {
+    setSelected(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug]);
   };
 
   return (
-    <div className="min-h-screen px-6 py-8 gradient-hero">
-      <div className="mx-auto max-w-md">
-
-        <h1 className="mb-2 text-3xl font-bold text-foreground">
-          באילו מנויים את/ה חבר/ה?
-        </h1>
-        <p className="mb-4 text-muted-foreground text-lg">
-          בחר/י את כל המנויים שלך כדי שנמצא לך את כל ההנחות
-        </p>
-
-        <div className="relative mb-6">
-          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <label htmlFor="membership-search" className="sr-only">חפש מנוי</label>
-          <Input
-            id="membership-search"
-            placeholder="חפש מנוי..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-10 rounded-xl border-none bg-card pr-10 text-foreground placeholder:text-muted-foreground shadow-card"
-          />
+    <div style={{ minHeight: '100vh', background: 'var(--lf-bg)', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ padding: '32px 24px 0' }}>
+        {/* Progress */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 28 }}>
+          {[0,1].map(i => (
+            <div key={i} style={{
+              flex: 1, height: 4, borderRadius: 999,
+              background: i === 1 ? 'var(--lf-ink)' : 'var(--lf-line)',
+            }}/>
+          ))}
         </div>
 
-        <Button
-          size="lg"
-          className="w-full text-lg h-14 gradient-primary text-primary-foreground mb-4"
-          onClick={handleFinish}
-          disabled={selected.length === 0}
-        >
-          {selected.length === 0
-            ? "בחר/י לפחות מנוי אחד"
-            : `המשך עם ${selected.length} מנויים`}
-        </Button>
+        <div style={{
+          fontFamily: "'Fraunces', Georgia, serif",
+          fontStyle: 'italic', fontWeight: 900, fontSize: 38,
+          lineHeight: 1, letterSpacing: -1, marginBottom: 10,
+        }}>
+          איזה מועדונים{' '}
+          <span style={{
+            background: 'var(--lf-yellow)', padding: '0 10px', borderRadius: 10,
+          }}>יש לך?</span>
+        </div>
+        <p style={{ fontSize: 15, color: 'var(--lf-ink-2)', marginBottom: 18, lineHeight: 1.5 }}>
+          בחר/י את כל מה שיש לך — נראה לך את כל ההנחות במקום אחד.
+        </p>
 
+        {/* Search */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: '#fff', borderRadius: 18, padding: '12px 16px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: 4,
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="7" stroke="#3E2A5B" strokeWidth="2.2"/>
+            <path d="M20 20l-3.5-3.5" stroke="#3E2A5B" strokeWidth="2.2" strokeLinecap="round"/>
+          </svg>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="חפש מועדון..."
+            style={{
+              border: 'none', outline: 'none', background: 'transparent',
+              flex: 1, fontSize: 16, color: 'var(--lf-ink)', fontFamily: 'inherit',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Scrollable list */}
+      <div className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '12px 24px 160px' }}>
         {isLoading ? (
-          <div className="py-8 text-center" role="status" aria-label="טוען מנויים">
-            <div className="gradient-primary h-10 w-10 mx-auto rounded-full animate-pulse mb-3" aria-hidden="true" />
-            <p className="text-muted-foreground">טוען מנויים...</p>
+          <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--lf-ink-2)' }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: '50%', margin: '0 auto 12px',
+              background: 'linear-gradient(135deg, var(--lf-primary), var(--lf-pink))',
+              animation: 'popIn 1.2s cubic-bezier(.34,1.56,.64,1) infinite',
+            }}/>
+            טוען מועדונים...
           </div>
         ) : (
-          <div className="space-y-6 mb-8 max-h-[55vh] overflow-y-auto">
-            {Object.entries(MEMBERSHIP_CATEGORIES).map(([category, slugs]) => {
-              const categoryMemberships = filteredMemberships.filter((m) => slugs.includes(m.slug));
-              if (categoryMemberships.length === 0) return null;
+          <>
+            {Object.entries(MEMBERSHIP_CATEGORIES).map(([cat, slugs]) => {
+              const items = filtered.filter(m => slugs.includes(m.slug));
+              if (items.length === 0) return null;
               return (
-                <div key={category}>
-                  <p className="text-sm font-semibold text-muted-foreground mb-2">{category}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {categoryMemberships.map((m) => (
-                      <MembershipButton
-                        key={m.slug}
+                <div key={cat} style={{ marginBottom: 26 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 700, color: 'var(--lf-ink-2)',
+                    textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14,
+                  }}>{cat}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+                    {items.map(m => (
+                      <ClubChip
+                        key={m.id}
                         membership={m}
-                        isSelected={selected.includes(m.slug)}
-                        onToggle={toggleMembership}
+                        selected={selected.includes(m.slug)}
+                        onToggle={() => toggle(m.slug)}
                       />
                     ))}
                   </div>
                 </div>
               );
             })}
-
-            {uncategorizedMemberships.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-2">🏷️ אחר</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {uncategorizedMemberships.map((m) => (
-                    <MembershipButton
-                      key={m.slug}
+            {uncategorized.length > 0 && (
+              <div style={{ marginBottom: 26 }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 700, color: 'var(--lf-ink-2)',
+                  textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14,
+                }}>🏷️ אחר</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+                  {uncategorized.map(m => (
+                    <ClubChip
+                      key={m.id}
                       membership={m}
-                      isSelected={selected.includes(m.slug)}
-                      onToggle={toggleMembership}
+                      selected={selected.includes(m.slug)}
+                      onToggle={() => toggle(m.slug)}
                     />
                   ))}
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
+      </div>
 
+      {/* Sticky CTA */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0,
+        padding: '16px 24px 32px',
+        background: 'linear-gradient(to top, var(--lf-bg) 65%, transparent)',
+      }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 12, fontSize: 14, color: 'var(--lf-ink-2)', fontWeight: 600,
+        }}>
+          {selected.length === 0
+            ? <span>לא נבחרו מועדונים עדיין</span>
+            : <span>{selected.length} נבחרו</span>
+          }
+          {selected.length > 0 && (
+            <span style={{
+              background: 'var(--lf-mint)', color: 'var(--lf-ink)',
+              padding: '4px 10px', borderRadius: 999, fontWeight: 800, fontSize: 13,
+            }}>
+              עד ~{selected.length * 24}₪ לחודש 🔥
+            </span>
+          )}
+        </div>
+        <button
+          className="lf-tap"
+          onClick={() => selected.length > 0 && onComplete(selected)}
+          disabled={selected.length === 0}
+          style={{
+            width: '100%', padding: '18px 26px', borderRadius: 999,
+            background: selected.length > 0 ? 'var(--lf-primary)' : 'var(--lf-line)',
+            color: selected.length > 0 ? '#fff' : 'rgba(0,0,0,0.3)',
+            fontFamily: "'Rubik', sans-serif", fontWeight: 700, fontSize: 18,
+            boxShadow: selected.length > 0
+              ? '0 4px 0 rgba(0,0,0,0.12), 0 8px 24px rgba(109,40,255,0.2)'
+              : 'none',
+            border: 'none', cursor: selected.length > 0 ? 'pointer' : 'not-allowed',
+            transition: 'all .2s',
+          }}>
+          המשך ({selected.length}) →
+        </button>
       </div>
     </div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+const OnboardingPage = () => {
+  const navigate = useNavigate();
+  const [step, setStep] = useState(0);
+
+  const handleComplete = (clubs: string[]) => {
+    setSelectedMemberships(clubs);
+    setOnboardingComplete(true);
+    navigate("/dashboard");
+  };
+
+  return (
+    <>
+      {step === 0 && <WelcomeScreen onNext={() => setStep(1)} />}
+      {step === 1 && <ClubsScreen onComplete={handleComplete} />}
+    </>
   );
 };
 

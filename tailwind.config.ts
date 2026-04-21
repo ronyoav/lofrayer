@@ -15,6 +15,8 @@ export default {
     extend: {
       fontFamily: {
         heebo: ['Heebo', 'sans-serif'],
+        rubik: ['Rubik', 'Heebo', 'sans-serif'],
+        fraunces: ['Fraunces', 'Georgia', 'serif'],
       },
       colors: {
         success: {
