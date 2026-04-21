@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const targetSlug = body?.slug || 'behatzada';
     const testMode = body?.test === true; // ?test=true → scrape only 1 page (for debugging)
+    const debugMode = body?.debug === true; // ?debug=true → return raw HTML for inspection
 
     const { data: membership, error: membershipError } = await supabase
       .from('memberships')
@@ -564,51 +565,68 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── Max: GCP VM proxy → Puppeteer render → HTML card parser ───
-    // max.co.il is an Angular SPA — benefits only render after JS execution.
-    // The GCP VM proxy (Puppeteer) renders the page and returns full HTML.
+    // ─── Max: direct API (no Puppeteer needed) ───
+    // max.co.il exposes a JSON API that returns all benefits with pagination.
+    // API endpoint: /api/benefits/getCategoriesLobby?isMobile=true&page=N&loadLobby=false&category=SLUG
     const isMax = membership.slug === 'max' || membership.scrape_url?.includes('max.co.il');
     if (isMax) {
-      const maxUrls = [
-        { url: 'https://www.max.co.il/benefits/movies',      category: 'בידור' },
-        { url: 'https://www.max.co.il/benefits/paybacksites', category: 'קניות אונליין' },
-        { url: 'https://www.max.co.il/benefits/tastytreat',  category: 'מזון' },
+      const maxCategories = testMode ? [
+        { slug: 'movies', category: 'בידור' },
+      ] : [
+        { slug: 'movies',       category: 'בידור' },
+        { slug: 'plays',        category: 'בידור' },
+        { slug: 'musicshows',   category: 'בידור' },
+        { slug: 'standupshows', category: 'בידור' },
+        { slug: 'attractions',  category: 'פנאי ומשפחה' },
+        { slug: 'tastytreat',   category: 'מזון' },
+        { slug: 'paybacksites', category: 'קניות אונליין' },
+        { slug: 'online',       category: 'קניות אונליין' },
+        { slug: 'fashion',      category: 'אופנה' },
+        { slug: 'vacation',     category: 'תיירות' },
+        { slug: 'abroadbenefits', category: 'תיירות' },
       ];
-      const urlsToScrape = testMode ? maxUrls.slice(0, 1) : maxUrls;
-      console.log(`Max mode: ${testMode ? 'TEST (1 page)' : 'FULL (3 pages)'}`);
-
-      const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
-      const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+      console.log(`Max API mode: ${testMode ? 'TEST (1 category)' : `FULL (${maxCategories.length} categories)`}`);
 
       try {
         const allDiscounts: any[] = [];
-        const seenTitles = new Set<string>();
+        const seenIds = new Set<number>();
 
-        for (const { url, category } of urlsToScrape) {
-          console.log(`Scraping Max page: ${url}`);
-          const proxyParams = new URLSearchParams({ key: calProxyKey, url });
-          try {
-            const proxyRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
-              signal: AbortSignal.timeout(60000),
-            });
-            if (!proxyRes.ok) {
-              console.error(`GCP proxy failed ${url}: HTTP ${proxyRes.status}`);
-              continue;
-            }
-            const html = await proxyRes.text();
-            console.log(`Got ${html.length} chars from ${url}`);
-            if (html.length < 1000) { console.error(`HTML too short — skipping`); continue; }
+        for (const { slug, category } of maxCategories) {
+          let page = 0;
+          while (true) {
+            const apiUrl = `https://www.max.co.il/api/benefits/getCategoriesLobby?isMobile=true&page=${page}&loadLobby=false&category=${slug}&club=undefined&region=undefined`;
+            console.log(`Fetching Max API: ${apiUrl}`);
+            try {
+              const res = await fetch(apiUrl, {
+                headers: { 'Accept': 'application/json', 'Accept-Language': 'he-IL,he;q=0.9' },
+                signal: AbortSignal.timeout(15000),
+              });
+              if (!res.ok) { console.error(`Max API ${slug} p${page}: HTTP ${res.status}`); break; }
+              const data = await res.json();
+              const benefits: any[] = data?.result?.benefits || [];
+              const isLast: boolean = data?.result?.isLast ?? true;
+              console.log(`Max API ${slug} p${page}: ${benefits.length} benefits, isLast=${isLast}`);
 
-            const pageDiscounts = extractMaxBenefits(html, category);
-            console.log(`Extracted ${pageDiscounts.length} from ${url}`);
-            for (const d of pageDiscounts) {
-              if (!seenTitles.has(d.title)) {
-                seenTitles.add(d.title);
-                allDiscounts.push(d);
+              for (const b of benefits) {
+                if (!b.id || seenIds.has(b.id)) continue;
+                seenIds.add(b.id);
+                const title = b.name || b.title || '';
+                if (!title) continue;
+                const discount_value = b.subTitle?.split('\n')[0]?.trim() || 'הטבה';
+                const brand_logo_url = b.image?.url || null;
+                const redeem_url = b.urlName ? `https://www.max.co.il/benefits/${b.urlName}` : 'https://www.max.co.il/benefits';
+                let brand = title;
+                const dashIdx = title.indexOf(' - ');
+                if (dashIdx > 0) brand = title.substring(0, dashIdx).trim();
+                allDiscounts.push({ brand, brand_logo_url, title, discount_value, category, redeem_url });
               }
+
+              if (isLast || benefits.length === 0) break;
+              page++;
+            } catch (err: any) {
+              console.error(`Max API error ${slug} p${page}: ${err.message}`);
+              break;
             }
-          } catch (err: any) {
-            console.error(`Error fetching ${url}: ${err.message}`);
           }
         }
 
@@ -616,7 +634,7 @@ Deno.serve(async (req) => {
 
         if (allDiscounts.length === 0) {
           return new Response(
-            JSON.stringify({ success: false, error: 'No discounts extracted from Max pages' }),
+            JSON.stringify({ success: false, error: 'No discounts extracted from Max API' }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
@@ -632,7 +650,7 @@ Deno.serve(async (req) => {
             discount_value: d.discount_value || 'הטבה',
             category: d.category || 'כללי',
             location: 'כל הארץ',
-            redeem_url: d.redeem_url || 'https://www.max.co.il/benefits',
+            redeem_url: d.redeem_url,
             membership_id: membership.id,
             scraped_at: new Date().toISOString(),
             is_active: true,
@@ -646,7 +664,7 @@ Deno.serve(async (req) => {
           );
         }
         return new Response(
-          JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'gcp-proxy+html-parser', pages: urlsToScrape.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
+          JSON.stringify({ success: true, membership: membership.name, discountsFound: allDiscounts.length, strategy: 'direct-api', categories: maxCategories.length, ...(testMode && { sampleDiscounts: allDiscounts.slice(0, 3) }) }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       } catch (e) {
@@ -976,10 +994,9 @@ function extractYoursBenefits(html: string, category: string): any[] {
       }
       try {
         const parsed = JSON.parse(html.substring(arrStart, arrEnd + 1));
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.product_id !== undefined) {
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.product_id !== undefined && parsed.length > items.length) {
           items = parsed;
           console.log(`Yours Strategy 2: found ${items.length} products via "products" key`);
-          break;
         }
       } catch { /* skip */ }
       pos = found + 1;
@@ -1028,7 +1045,7 @@ function extractPoalimWonderBenefits(html: string, _baseUrl: string): any[] {
   while ((match = blockRegex.exec(html)) !== null) {
     const inner = match[1];
 
-    const titleMatch = inner.match(/<div[^>]+class="[^"]*team-member-title[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const titleMatch = inner.match(/class="[^"]*team-member-title[^"]*"[^>]*>([\s\S]*?)<\/(?:div|h2|h3|p)>/i);
     if (!titleMatch) continue;
     const brand = titleMatch[1].replace(/<[^>]+>/g, '').trim();
     if (!brand || seen.has(brand)) continue;
