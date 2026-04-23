@@ -1,16 +1,11 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getOnboardingComplete } from "@/lib/storage";
 
 const Index = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (getOnboardingComplete()) {
-      navigate("/dashboard", { replace: true });
-    } else {
-      navigate("/onboarding", { replace: true });
-    }
+    navigate("/dashboard", { replace: true });
   }, [navigate]);
 
   return (

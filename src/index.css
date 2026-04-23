@@ -99,6 +99,12 @@
 .lf-slide-up { animation: slideUp .5s  cubic-bezier(.22,1,.36,1)   both; }
 .lf-floaty   { animation: floaty  4s   ease-in-out infinite; }
 
+@keyframes ctaFloat {
+  0%, 100% { transform: translateY(0); box-shadow: 0 4px 0 rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.10); }
+  50%       { transform: translateY(-10px); box-shadow: 0 16px 0 rgba(0,0,0,0.10), 0 24px 40px rgba(0,0,0,0.18); }
+}
+.lf-cta-float { animation: ctaFloat 2.2s ease-in-out infinite; }
+
 .lf-tap { transition: transform .15s ease, filter .15s ease; }
 .lf-tap:active { transform: scale(.97); filter: brightness(.96); }
 

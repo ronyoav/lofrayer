@@ -32,6 +32,45 @@ export type DbMembership = {
   website_url: string | null;
 };
 
+export type DiscountResult = DbDiscount & {
+  membership: { id: string; slug: string; name: string; logo_url: string | null } | null;
+  brandLogo: string | null;
+  membershipName: string;
+  membershipLogoUrl: string | null;
+};
+
+export function useAllDiscounts() {
+  return useQuery({
+    queryKey: ["discounts", "all"],
+    queryFn: async () => {
+      const [{ data: allMemberships }, { data: discounts, error }] = await Promise.all([
+        supabase.from("memberships").select("id, slug, name, logo_url"),
+        supabase.from("discounts").select("*").eq("is_active", true),
+      ]);
+
+      if (error) throw error;
+
+      const membershipMap = Object.fromEntries(
+        (allMemberships || []).map((m) => [m.id, m])
+      );
+
+      return (discounts || []).map((d) => ({
+        ...d,
+        membership: membershipMap[d.membership_id] || null,
+        brandLogo: BRAND_LOGOS[d.brand] || d.brand_logo_url || null,
+        membershipName: (() => {
+          const name = membershipMap[d.membership_id]?.name || "";
+          return name.startsWith("פועלים Wonder") ? "פועלים Wonder" : name;
+        })(),
+        membershipLogoUrl:
+          MEMBERSHIP_LOGOS[membershipMap[d.membership_id]?.slug || ""] ||
+          membershipMap[d.membership_id]?.logo_url ||
+          null,
+      })) as DiscountResult[];
+    },
+  });
+}
+
 export function useDiscounts(membershipSlugs: string[]) {
   return useQuery({
     queryKey: ["discounts", membershipSlugs],

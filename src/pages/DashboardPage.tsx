@@ -1,6 +1,4 @@
 import { useState, useMemo } from "react";
-import { Settings, LogOut } from "lucide-react";
-import { CATEGORIES } from "@/data/mockData";
 import { MEMBERSHIP_LOGOS } from "@/data/mockData";
 import {
   getSelectedMemberships,
@@ -9,7 +7,7 @@ import {
 } from "@/lib/storage";
 import DiscountCard from "@/components/DiscountCard";
 import { useNavigate } from "react-router-dom";
-import { useDiscounts, useMemberships } from "@/hooks/useDiscounts";
+import { useAllDiscounts, useMemberships, type DiscountResult } from "@/hooks/useDiscounts";
 
 // ── Search helpers ────────────────────────────────────────────────────────────
 const hebrewToLatin: Record<string, string> = {
@@ -25,6 +23,11 @@ function normalizeForSearch(str: string) {
 
 function matchesSearch(text: string, q: string) {
   return normalizeForSearch(text).includes(q);
+}
+
+// Normalize Poalim Wonder sub-slugs to parent slug for filtering
+function normalizeMembershipSlug(slug: string): string {
+  return slug.startsWith('poalim-wonder') ? 'poalim-wonder' : slug;
 }
 
 // ── Category meta ─────────────────────────────────────────────────────────────
@@ -57,7 +60,6 @@ const MEMBERSHIP_EMOJIS: Record<string, string> = {
   "rami-levy-club":"🛒","shufersal-club":"🛒",
 };
 
-// Gradient colors for membership wallet cards (fallback palette)
 const MEMBERSHIP_CARD_COLORS: Record<string, [string, string]> = {
   "cal": ["#1A4CAD","#2B64D4"], "max": ["#00C2A8","#00A890"],
   "isracard": ["#E30613","#B00010"], "isracard-benefits": ["#E30613","#B00010"],
@@ -74,6 +76,74 @@ const MEMBERSHIP_CARD_COLORS: Record<string, [string, string]> = {
 
 function getMembershipColors(slug: string): [string, string] {
   return MEMBERSHIP_CARD_COLORS[slug] ?? ["#6D28FF","#A47BFF"];
+}
+
+// ── Membership filter chips (shared between tabs) ─────────────────────────────
+function MembershipChips({
+  discounts,
+  membershipFilter,
+  onSelect,
+}: {
+  discounts: DiscountResult[];
+  membershipFilter: string | null;
+  onSelect: (slug: string | null) => void;
+}) {
+  const availableMemberships = useMemo(() => {
+    const seen = new Map<string, { slug: string; name: string; logoUrl: string | null }>();
+    discounts.forEach(d => {
+      if (d.membership) {
+        const slug = normalizeMembershipSlug(d.membership.slug);
+        if (!seen.has(slug)) {
+          seen.set(slug, { slug, name: d.membershipName, logoUrl: d.membershipLogoUrl });
+        }
+      }
+    });
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  }, [discounts]);
+
+  if (availableMemberships.length === 0) return null;
+
+  return (
+    <div className="no-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
+      <button
+        className="lf-tap"
+        onClick={() => onSelect(null)}
+        style={{
+          flexShrink: 0, padding: '8px 14px', borderRadius: 999,
+          background: !membershipFilter ? 'var(--lf-ink)' : '#fff',
+          color: !membershipFilter ? 'var(--lf-bg)' : 'var(--lf-ink)',
+          fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer',
+          boxShadow: !membershipFilter ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
+        }}>
+        הכל
+      </button>
+      {availableMemberships.map(m => {
+        const isActive = membershipFilter === m.slug;
+        const logo = MEMBERSHIP_LOGOS[m.slug];
+        return (
+          <button
+            key={m.slug}
+            className="lf-tap"
+            onClick={() => onSelect(isActive ? null : m.slug)}
+            style={{
+              flexShrink: 0, padding: '7px 12px 7px 8px', borderRadius: 999,
+              background: isActive ? 'var(--lf-ink)' : '#fff',
+              color: isActive ? 'var(--lf-bg)' : 'var(--lf-ink)',
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer',
+              boxShadow: isActive ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
+              transition: 'all .15s',
+            }}>
+            {logo
+              ? <img src={logo} alt="" style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 4, filter: isActive ? 'brightness(0) invert(1)' : 'none' }} />
+              : <span style={{ fontSize: 14 }}>{MEMBERSHIP_EMOJIS[m.slug] || '🏷️'}</span>
+            }
+            {m.name}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
@@ -150,20 +220,30 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 function HomeTab({
   discounts, isLoading, userMemberships, onGoSearch, onGoWallet,
 }: {
-  discounts: ReturnType<typeof useDiscounts>['data'] & object;
+  discounts: DiscountResult[];
   isLoading: boolean;
   userMemberships: string[];
   onGoSearch: () => void;
   onGoWallet: () => void;
 }) {
   const [selectedCat, setSelectedCat] = useState("הכל");
+  const [membershipFilter, setMembershipFilter] = useState<string | null>(null);
   const { data: allMemberships = [] } = useMemberships();
   const myMemberships = allMemberships.filter(m => userMemberships.includes(m.slug));
 
+  const uniqueMembershipsCount = useMemo(() => {
+    const slugs = new Set((discounts || []).map(d => d.membership?.slug).filter(Boolean));
+    return slugs.size;
+  }, [discounts]);
+
   const filtered = useMemo(() => {
-    if (selectedCat === "הכל") return discounts || [];
-    return (discounts || []).filter(d => d.category === selectedCat);
-  }, [discounts, selectedCat]);
+    let result = (discounts || []);
+    if (selectedCat !== "הכל") result = result.filter(d => d.category === selectedCat);
+    if (membershipFilter) {
+      result = result.filter(d => normalizeMembershipSlug(d.membership?.slug || '') === membershipFilter);
+    }
+    return result;
+  }, [discounts, selectedCat, membershipFilter]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, typeof filtered> = {};
@@ -254,7 +334,7 @@ function HomeTab({
           }}/>
           <div style={{ position: 'relative', zIndex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.9 }}>
-              ההנחות שלך
+              כל ההנחות
             </div>
             <div style={{
               fontFamily: "'Fraunces', Georgia, serif",
@@ -264,17 +344,19 @@ function HomeTab({
               {isLoading ? '...' : (discounts?.length ?? 0)}
             </div>
             <div style={{ fontSize: 14, opacity: 0.85, marginTop: 2 }}>
-              הטבות זמינות עבורך
+              הטבות מ-{isLoading ? '...' : uniqueMembershipsCount} מועדונים
             </div>
-            <div style={{ marginTop: 10 }}>
-              <span style={{
-                background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(10px)',
-                padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-              }}>
-                🔥 ב-{myMemberships.length} מועדונים
-              </span>
-            </div>
+            {myMemberships.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <span style={{
+                  background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(10px)',
+                  padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700,
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                }}>
+                  ✨ {myMemberships.length} מועדונים שלך
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -326,6 +408,15 @@ function HomeTab({
           </div>
         </div>
       )}
+
+      {/* Membership filter chips */}
+      <div style={{ marginBottom: 14, padding: '0 20px' }}>
+        <MembershipChips
+          discounts={discounts}
+          membershipFilter={membershipFilter}
+          onSelect={setMembershipFilter}
+        />
+      </div>
 
       {/* Category filter chips */}
       <div style={{ marginBottom: 20 }}>
@@ -420,20 +511,22 @@ function HomeTab({
 function SearchTab({
   discounts, isLoading, onClose,
 }: {
-  discounts: ReturnType<typeof useDiscounts>['data'] & object;
+  discounts: DiscountResult[];
   isLoading: boolean;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | null>(null);
+  const [membershipFilter, setMembershipFilter] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const nq = normalizeForSearch(q);
     return (discounts || []).filter(d =>
       (!q || matchesSearch(d.brand, nq) || matchesSearch(d.title, nq) || matchesSearch(d.description || '', nq)) &&
-      (!cat || d.category === cat)
+      (!cat || d.category === cat) &&
+      (!membershipFilter || normalizeMembershipSlug(d.membership?.slug || '') === membershipFilter)
     );
-  }, [discounts, q, cat]);
+  }, [discounts, q, cat, membershipFilter]);
 
   const allCats = useMemo(() => {
     const s = new Set((discounts || []).map(d => d.category).filter(Boolean));
@@ -510,10 +603,19 @@ function SearchTab({
             </button>
           ))}
         </div>
+
+        {/* Membership filter chips */}
+        <div className="no-scrollbar" style={{ marginTop: 10 }}>
+          <MembershipChips
+            discounts={discounts}
+            membershipFilter={membershipFilter}
+            onSelect={setMembershipFilter}
+          />
+        </div>
       </div>
 
       {/* Trending */}
-      {!q && !cat && (
+      {!q && !cat && !membershipFilter && (
         <div style={{ padding: '0 20px 20px' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--lf-ink-2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>טרנדים</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -742,12 +844,21 @@ const DashboardPage = () => {
   const userMemberships = getSelectedMemberships();
   const [tab, setTab] = useState<Tab>('home');
 
-  const { data: discounts = [], isLoading } = useDiscounts(userMemberships);
+  const { data: discounts = [], isLoading } = useAllDiscounts();
+
+  // Count discounts matching user's own memberships (for wallet/me tab display)
+  const userDiscountCount = useMemo(() => {
+    if (userMemberships.length === 0) return discounts.length;
+    return discounts.filter(d => {
+      const slug = normalizeMembershipSlug(d.membership?.slug || '');
+      return userMemberships.includes(slug) || userMemberships.includes(d.membership?.slug || '');
+    }).length;
+  }, [discounts, userMemberships]);
 
   const handleReset = () => {
     setOnboardingComplete(false);
     setSelectedMemberships([]);
-    navigate("/");
+    navigate("/onboarding");
   };
 
   return (
@@ -761,8 +872,8 @@ const DashboardPage = () => {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         <div style={{
-          fontFamily: "'Fraunces', Georgia, serif",
-          fontStyle: 'italic', fontWeight: 900, fontSize: 26,
+          fontFamily: "'Rubik', sans-serif",
+          fontWeight: 900, fontSize: 26,
           letterSpacing: -1,
           background: 'linear-gradient(120deg, var(--lf-primary) 0%, var(--lf-pink) 100%)',
           WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
@@ -789,14 +900,14 @@ const DashboardPage = () => {
       {tab === 'wallet' && (
         <WalletTab
           userMemberships={userMemberships}
-          discountCount={discounts.length}
+          discountCount={userDiscountCount}
           onAddMore={handleReset}
         />
       )}
       {tab === 'me' && (
         <MeTab
           userMemberships={userMemberships}
-          discountCount={discounts.length}
+          discountCount={userDiscountCount}
           onReset={handleReset}
           onAdmin={() => navigate('/admin')}
         />

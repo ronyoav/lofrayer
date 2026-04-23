@@ -51,42 +51,12 @@ function WelcomeScreen({ onNext }: { onNext: () => void }) {
         background: 'radial-gradient(circle, rgba(255,210,63,0.4) 0%, transparent 70%)',
         filter: 'blur(32px)', pointerEvents: 'none',
       }}/>
-      {/* Floating sticker tags */}
-      <div className="lf-floaty" style={{
-        position: 'absolute', top: '12%', right: '6%',
-        background: 'var(--lf-yellow)', color: 'var(--lf-ink)',
-        padding: '8px 14px', borderRadius: 10, fontWeight: 800, fontSize: 20,
-        transform: 'rotate(12deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
-        animationDelay: '.4s',
-      }}>‑40%</div>
-      <div className="lf-floaty" style={{
-        position: 'absolute', top: '24%', left: '4%',
-        background: 'var(--lf-pink)', color: '#fff',
-        padding: '7px 12px', borderRadius: 10, fontWeight: 800, fontSize: 16,
-        transform: 'rotate(-10deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.12)',
-        animationDelay: '.8s',
-      }}>1+1</div>
-      <div className="lf-floaty" style={{
-        position: 'absolute', bottom: '28%', right: '8%',
-        background: 'var(--lf-mint)', color: 'var(--lf-ink)',
-        padding: '6px 11px', borderRadius: 10, fontWeight: 800, fontSize: 13,
-        transform: 'rotate(-6deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
-        animationDelay: '1.4s',
-      }}>חדש! 🔥</div>
-      <div className="lf-floaty" style={{
-        position: 'absolute', bottom: '34%', left: '6%',
-        background: 'var(--lf-coral)', color: '#fff',
-        padding: '6px 11px', borderRadius: 10, fontWeight: 800, fontSize: 13,
-        transform: 'rotate(8deg)', boxShadow: '0 3px 0 rgba(0,0,0,0.1)',
-        animationDelay: '2s',
-      }}>חם 🔥</div>
-
       {/* Wordmark */}
       <div className="lf-slide-up" style={{ position: 'relative', zIndex: 1, textAlign: 'center', marginBottom: 20 }}>
         <div style={{
-          fontFamily: "'Fraunces', Georgia, serif",
-          fontStyle: 'italic', fontWeight: 900, fontSize: 88,
-          lineHeight: 0.9, letterSpacing: -3,
+          fontFamily: "'Rubik', sans-serif",
+          fontWeight: 900, fontSize: 80,
+          lineHeight: 0.9, letterSpacing: -4,
           background: 'linear-gradient(120deg, var(--lf-primary) 0%, var(--lf-pink) 55%, var(--lf-coral) 100%)',
           WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
         }}>lofrayer</div>
@@ -106,7 +76,7 @@ function WelcomeScreen({ onNext }: { onNext: () => void }) {
         כל ההנחות של כל המועדונים שלך,<br/>במקום אחד. לקנייה חכמה.
       </p>
 
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360 }}>
+      <div className="lf-cta-float" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360 }}>
         <button
           className="lf-tap"
           onClick={onNext}
@@ -114,7 +84,6 @@ function WelcomeScreen({ onNext }: { onNext: () => void }) {
             width: '100%', padding: '18px 26px', borderRadius: 999,
             background: 'var(--lf-ink)', color: 'var(--lf-bg)',
             fontFamily: "'Rubik', sans-serif", fontWeight: 700, fontSize: 18,
-            boxShadow: '0 4px 0 rgba(0,0,0,0.14), 0 8px 24px rgba(0,0,0,0.08)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             border: 'none', cursor: 'pointer',
           }}>
