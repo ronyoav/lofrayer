@@ -198,14 +198,36 @@ function ClubsScreen({ onComplete }: { onComplete: (clubs: string[]) => void }) 
           fontStyle: 'italic', fontWeight: 900, fontSize: 38,
           lineHeight: 1, letterSpacing: -1, marginBottom: 10,
         }}>
-          איזה מועדונים{' '}
+          הוסף את כל{' '}
           <span style={{
             background: 'var(--lf-yellow)', padding: '0 10px', borderRadius: 10,
-          }}>יש לך?</span>
+          }}>המועדונים שלך</span>
         </div>
-        <p style={{ fontSize: 15, color: 'var(--lf-ink-2)', marginBottom: 18, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 15, color: 'var(--lf-ink-2)', marginBottom: 14, lineHeight: 1.5 }}>
           בחר/י את כל מה שיש לך — נראה לך את כל ההנחות במקום אחד.
         </p>
+
+        {/* Select all */}
+        <button
+          className="lf-tap"
+          onClick={() => {
+            const allSlugs = memberships.map(m => m.slug);
+            const allSelected = allSlugs.every(s => selected.includes(s));
+            setSelected(allSelected ? [] : allSlugs);
+          }}
+          style={{
+            marginBottom: 14, padding: '8px 16px', borderRadius: 999,
+            background: memberships.length > 0 && memberships.every(m => selected.includes(m.slug))
+              ? 'var(--lf-ink)' : 'var(--lf-bg-2)',
+            color: memberships.length > 0 && memberships.every(m => selected.includes(m.slug))
+              ? 'var(--lf-bg)' : 'var(--lf-ink)',
+            fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+          {memberships.length > 0 && memberships.every(m => selected.includes(m.slug))
+            ? '✓ כל המועדונים נבחרו'
+            : '✦ בחר את כולם'}
+        </button>
 
         {/* Search */}
         <div style={{

@@ -45,7 +45,7 @@ export function useAllDiscounts() {
     queryFn: async () => {
       const [{ data: allMemberships }, { data: discounts, error }] = await Promise.all([
         supabase.from("memberships").select("id, slug, name, logo_url"),
-        supabase.from("discounts").select("*").eq("is_active", true),
+        supabase.from("discounts").select("*").eq("is_active", true).limit(5000),
       ]);
 
       if (error) throw error;
