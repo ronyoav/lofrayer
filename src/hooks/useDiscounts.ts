@@ -60,6 +60,7 @@ export function useAllDiscounts() {
           .from("discounts")
           .select("*")
           .eq("is_active", true)
+          .order("id")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         rows = rows.concat(data || []);
