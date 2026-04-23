@@ -753,8 +753,9 @@ const DashboardPage = () => {
   const userDiscountCount = useMemo(() => {
     if (userMemberships.length === 0) return discounts.length;
     return discounts.filter(d => {
-      const slug = normalizeMembershipSlug(d.membership?.slug || '');
-      return userMemberships.includes(slug) || userMemberships.includes(d.membership?.slug || '');
+      const rawSlug = d.membership?.slug || '';
+      const slug = rawSlug.startsWith('poalim-wonder') ? 'poalim-wonder' : rawSlug;
+      return userMemberships.includes(slug) || userMemberships.includes(rawSlug);
     }).length;
   }, [discounts, userMemberships]);
 
