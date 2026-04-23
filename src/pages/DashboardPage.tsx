@@ -178,9 +178,17 @@ function HomeTab({
   }, [discounts, userMemberships]);
 
   const filtered = useMemo(() => {
-    if (selectedCat === "הכל") return (discounts || []);
-    return (discounts || []).filter(d => d.category === selectedCat);
-  }, [discounts, selectedCat]);
+    let result = (discounts || []);
+    // Show only user's memberships when they have selections
+    if (userMemberships.length > 0) {
+      result = result.filter(d => {
+        const slug = normalizeSlug(d.membership?.slug || '');
+        return userMemberships.includes(slug) || userMemberships.includes(d.membership?.slug || '');
+      });
+    }
+    if (selectedCat !== "הכל") result = result.filter(d => d.category === selectedCat);
+    return result;
+  }, [discounts, selectedCat, userMemberships]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, typeof filtered> = {};
@@ -195,9 +203,16 @@ function HomeTab({
   }, [filtered]);
 
   const allCategories = useMemo(() => {
-    const cats = new Set((discounts || []).map(d => d.category).filter(Boolean));
+    // Base category list on the membership-filtered pool (before category filter)
+    const base = userMemberships.length > 0
+      ? (discounts || []).filter(d => {
+          const slug = normalizeSlug(d.membership?.slug || '');
+          return userMemberships.includes(slug) || userMemberships.includes(d.membership?.slug || '');
+        })
+      : (discounts || []);
+    const cats = new Set(base.map(d => d.category).filter(Boolean));
     return ["הכל", ...CATEGORY_ORDER.filter(c => cats.has(c)), ...[...cats].filter(c => !CATEGORY_ORDER.includes(c || ''))];
-  }, [discounts]);
+  }, [discounts, userMemberships]);
 
   return (
     <div style={{ paddingBottom: 100 }}>
