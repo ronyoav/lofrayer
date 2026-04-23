@@ -157,10 +157,25 @@ function HomeTab({
   const { data: allMemberships = [] } = useMemberships();
   const myMemberships = allMemberships.filter(m => userMemberships.includes(m.slug));
 
+  // Normalize poalim-wonder sub-slugs so they count as one membership
+  const normalizeSlug = (slug: string) =>
+    slug.startsWith('poalim-wonder') ? 'poalim-wonder' : slug;
+
   const uniqueMembershipsCount = useMemo(() => {
-    const slugs = new Set((discounts || []).map(d => d.membership?.slug).filter(Boolean));
+    const slugs = new Set(
+      (discounts || []).map(d => normalizeSlug(d.membership?.slug || '')).filter(Boolean)
+    );
     return slugs.size;
   }, [discounts]);
+
+  // Discounts for the user's own selected memberships
+  const myDiscountCount = useMemo(() => {
+    if (userMemberships.length === 0) return 0;
+    return (discounts || []).filter(d => {
+      const slug = normalizeSlug(d.membership?.slug || '');
+      return userMemberships.includes(slug) || userMemberships.includes(d.membership?.slug || '');
+    }).length;
+  }, [discounts, userMemberships]);
 
   const filtered = useMemo(() => {
     if (selectedCat === "הכל") return (discounts || []);
@@ -256,29 +271,20 @@ function HomeTab({
           }}/>
           <div style={{ position: 'relative', zIndex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.9 }}>
-              כל ההנחות
+              {myMemberships.length > 0 ? 'ההנחות שלך' : 'כל ההנחות'}
             </div>
             <div style={{
               fontFamily: "'Fraunces', Georgia, serif",
               fontStyle: 'italic', fontWeight: 900, fontSize: 52,
               lineHeight: 1, letterSpacing: -2, marginTop: 4,
             }}>
-              {isLoading ? '...' : (discounts?.length ?? 0)}
+              {isLoading ? '...' : (myMemberships.length > 0 ? myDiscountCount : (discounts?.length ?? 0))}
             </div>
             <div style={{ fontSize: 14, opacity: 0.85, marginTop: 2 }}>
-              הטבות מ-{isLoading ? '...' : uniqueMembershipsCount} מועדונים
+              {myMemberships.length > 0
+                ? `הטבות ב-${myMemberships.length} מועדונים שלך`
+                : `הטבות מ-${isLoading ? '...' : uniqueMembershipsCount} מועדונים`}
             </div>
-            {myMemberships.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <span style={{
-                  background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(10px)',
-                  padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                }}>
-                  ✨ {myMemberships.length} מועדונים שלך
-                </span>
-              </div>
-            )}
           </div>
         </div>
       </div>
