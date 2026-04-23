@@ -43,18 +43,31 @@ export function useAllDiscounts() {
   return useQuery({
     queryKey: ["discounts", "all"],
     queryFn: async () => {
-      const [{ data: allMemberships }, { data: discounts, error }] = await Promise.all([
-        supabase.from("memberships").select("id, slug, name, logo_url"),
-        supabase.from("discounts").select("*").eq("is_active", true).limit(5000),
-      ]);
-
-      if (error) throw error;
+      const { data: allMemberships } = await supabase
+        .from("memberships")
+        .select("id, slug, name, logo_url");
 
       const membershipMap = Object.fromEntries(
         (allMemberships || []).map((m) => [m.id, m])
       );
 
-      return (discounts || []).map((d) => ({
+      // Paginate to bypass Supabase's 1000-row server-side cap
+      const PAGE = 1000;
+      let rows: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("discounts")
+          .select("*")
+          .eq("is_active", true)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        rows = rows.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+
+      return rows.map((d) => ({
         ...d,
         membership: membershipMap[d.membership_id] || null,
         brandLogo: BRAND_LOGOS[d.brand] || d.brand_logo_url || null,

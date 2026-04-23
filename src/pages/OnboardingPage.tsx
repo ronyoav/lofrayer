@@ -327,7 +327,7 @@ function ClubsScreen({ onComplete }: { onComplete: (clubs: string[]) => void }) 
               background: 'var(--lf-mint)', color: 'var(--lf-ink)',
               padding: '4px 10px', borderRadius: 999, fontWeight: 800, fontSize: 13,
             }}>
-              עד ~{selected.length * 24}₪ לחודש 🔥
+              {selected.length} נבחרו ✓
             </span>
           )}
         </div>
