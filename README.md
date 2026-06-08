@@ -4,9 +4,9 @@ An Israeli discount aggregator — all the benefits from all your membership clu
 
 ## What it does
 
-Israelis carry memberships across credit cards, banks, HMOs, unions, insurance companies, and more — each with their own discount portal. lofrayer lets users select the clubs they belong to and instantly see every discount available to them, without manually checking each site.
+Israelis carry memberships across credit cards, banks, Consumer clubs  — each with their own discount portal. lofrayer lets users select the clubs they belong to and instantly see every discount available to them, without manually checking each site.
 
-**Live:** [lofrayer.vercel.app](https://lofrayer.vercel.app)
+**Try it:** [lofrayer.vercel.app](https://lofrayer.vercel.app/onboarding)
 
 ---
 
@@ -19,7 +19,7 @@ Israelis carry memberships across credit cards, banks, HMOs, unions, insurance c
 | Database | Supabase (PostgreSQL) |
 | Scraping | Supabase Edge Functions + Puppeteer (Stealth) + Browserless + direct fetch |
 | Deploy | Vercel |
-| Scraper infrastructure | GCP VM in `me-west1-b` (Israeli IP) |
+| Cloud Server | GCP VM in `me-west1-b` (Israeli IP) |
 
 ---
 
@@ -45,46 +45,14 @@ Scrapers run on an Israeli GCP VM because several sites (CAL, Isracard) block no
 
 ## Supported clubs
 
-**Credit cards:** CAL, MAX, Isracard, Visa  
-**Banks:** Hapoalim (+ Wonder), Leumi, Discount, Mizrahi, Yahav  
-**HMOs:** Clalit, Maccabi, Leumit, Meuhedet  
-**Military / security:** Behatzada, Hever, Police  
-**Labor unions:** Histadrut, Teachers, Civil Service, Medical  
-**Telecom & energy:** HOT, Partner, Cellcom, Pelephone, Paz, Sonol  
-**Insurance:** Migdal, Harel, Menora, Clal  
-**Consumer clubs:** Face, ClubHub, Pais Plus, Hofesh, Rami Levy, Shufersal  
+**Credit cards:** CAL, MAX, Isracard
+**Banks:** Hapoalim (+ Wonder)    
+**Military / security:** Behatzada        
+**Consumer clubs:** Pais Plus, שלך.  
 
 ---
 
-## Technical challenges
 
-### Cloudflare bot protection
-Isracard and CAL run aggressive Cloudflare bot detection. Plain curl and standard Browserless both get blocked. Fix: Puppeteer with `puppeteer-extra-plugin-stealth` to mask automation fingerprints, launched from the Israeli VM.
-
-### Geographic blocking
-Some sites return different content (or errors) from non-Israeli IPs. Solved by routing all sensitive scrapers through a GCP VM in `me-west1-b` (Tel Aviv). PM2 keeps the proxy process alive with automatic restarts.
-
-### `networkidle2` never resolving
-Isracard runs continuous analytics traffic, so `waitUntil: 'networkidle2'` hangs indefinitely. Fix: `waitUntil: 'domcontentloaded'` + waiting for a specific DOM selector instead.
-
-### Two different HTML structures on Isracard
-Regular (online) benefits are in `.category-item`; cinema benefits are in `.category-featured-benefit`. Each requires its own extractor.
-
-### Secrets management
-All scraper credentials and VM URLs live in Supabase Edge Function secrets — not in `.env`, not in git.
-
----
-
-## Getting started
-
-```bash
-npm install
-npm run dev
-```
-
-No `.env` needed for frontend development — environment variables live in Supabase Edge Function secrets.
-
----
 
 ## Project structure
 
