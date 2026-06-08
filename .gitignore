@@ -36,3 +36,8 @@ keys/
 *.txt
 summarize.md
 *.docx
+
+# Environment secrets
+.env
+.env.*
+!.env.example
