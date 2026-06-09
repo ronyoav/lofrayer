@@ -37,3 +37,6 @@ keys/
 summarize.md
 *.docx
 CLAUDE.md
+
+
+.env
