@@ -5,7 +5,7 @@ const Index = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    navigate("/dashboard", { replace: true });
+    navigate("/onboarding", { replace: true });
   }, [navigate]);
 
   return (

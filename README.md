@@ -6,7 +6,7 @@ An Israeli discount aggregator — all the benefits from all your membership clu
 
 Israelis carry memberships across credit cards, banks, Consumer clubs  — each with their own discount portal. lofrayer lets users select the clubs they belong to and instantly see every discount available to them, without manually checking each site.
 
-**Try it:** [lofrayer.vercel.app](https://lofrayer.vercel.app/onboarding)
+**Try it:** [lofrayer.vercel.app](https://lofrayer.vercel.app)
 
 [![LoFrayer Demo](https://img.youtube.com/vi/jJN95On66o4/maxresdefault.jpg)](https://youtu.be/jJN95On66o4)
 ---
