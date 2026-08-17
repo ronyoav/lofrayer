@@ -1,0 +1,19 @@
+{
+  "name": "lofrayer-scraper-proxy",
+  "version": "1.0.0",
+  "description": "Israeli-IP Puppeteer+Stealth fetch proxy for LoFrayer scrapers. Runs as an AWS Lambda container image in il-central-1.",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "local": "node local.js",
+    "smoke": "node smoke-test.js",
+    "docker:smoke": "docker run --rm --entrypoint /var/lang/bin/node lofrayer-scraper-proxy:test smoke-test.js",
+    "docker:build": "docker build -t lofrayer-scraper-proxy .",
+    "docker:run": "docker run --rm -p 9000:8080 -e PROXY_KEY=dev-key lofrayer-scraper-proxy"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
