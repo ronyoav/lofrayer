@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DispatcherEnqueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl"
+      ],
+      "Resource": "arn:aws:sqs:il-central-1:347076821078:lofrayer-scrape-jobs"
+    },
+    {
+      "Sid": "WorkerConsumes",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:il-central-1:347076821078:lofrayer-scrape-jobs",
+        "arn:aws:sqs:il-central-1:347076821078:lofrayer-scrape-dlq"
+      ]
+    }
+  ]
+}

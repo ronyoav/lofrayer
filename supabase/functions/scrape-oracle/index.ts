@@ -20,6 +20,30 @@ function getProxyConfig(): { url: string; key: string } {
   return { url: url.replace(/\/+$/, ''), key };
 }
 
+// The proxy's first request after an idle period pays a ~32s cold start, which
+// is over API Gateway's 30s integration cap, so it comes back as 503. One retry
+// turns that into a warm second attempt (~1.5s).
+//
+// This is deliberately cheaper than the alternative: keeping the function warm
+// with a scheduled ping costs thousands of invocations a month to avoid a cold
+// start that a weekly scrape hits at most once per run.
+async function fetchViaProxy(
+  proxy: { url: string; key: string },
+  targetUrl: string,
+  timeoutMs: number,
+): Promise<Response> {
+  const endpoint = `${proxy.url}/?key=${proxy.key}&url=${encodeURIComponent(targetUrl)}`;
+
+  const res = await fetch(endpoint, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.ok) return res;
+
+  // Only a gateway timeout is worth retrying — 4xx means a real problem.
+  if (res.status !== 503 && res.status !== 504) return res;
+
+  console.log(`Proxy ${res.status} for ${targetUrl} — likely cold start, retrying once`);
+  return fetch(endpoint, { signal: AbortSignal.timeout(timeoutMs) });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -88,6 +112,22 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Providers that have moved to the AWS queue must not also run here — the
+    // two paths write the same rows and would fight over them. A provider lives
+    // in exactly one place: this list, or PROVIDERS in scraper-service/dispatcher.js.
+    const QUEUE_MIGRATED = ['pais', 'paisplus'];
+    if (QUEUE_MIGRATED.includes(membership.slug)) {
+      return new Response(
+        JSON.stringify({
+          error: `${membership.slug} is scraped by the AWS queue, not here.`,
+          schedule: 'Sundays 03:00 Asia/Jerusalem',
+          runOnDemand: 'aws lambda invoke --function-name lofrayer-scrape-dispatcher ' +
+            `--payload '{"slug":"${membership.slug}"}' --region il-central-1 out.json`,
+        }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const scrapeUrl = membership.scrape_url || 'https://www.behatsdaa.org.il/';
 
     // SSRF protection: only allow known Israeli benefit sites
@@ -132,13 +172,9 @@ Deno.serve(async (req) => {
 
         for (const israUrl of israUrls) {
           console.log(`Scraping Isracard page: ${israUrl}`);
-          const proxyParams = new URLSearchParams({ key: calProxyKey, url: israUrl });
+          const wsRes = await fetchViaProxy({ url: calProxyUrl, key: calProxyKey }, israUrl, 55000);
 
-          const wsRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
-            signal: AbortSignal.timeout(55000),
-          });
-
-          console.log(`GCP proxy status for ${israUrl}: ${wsRes.status}`);
+          console.log(`Proxy status for ${israUrl}: ${wsRes.status}`);
 
           if (!wsRes.ok) {
             console.error(`Failed to fetch ${israUrl}: HTTP ${wsRes.status}`);
@@ -251,11 +287,8 @@ Deno.serve(async (req) => {
           const batchResults = await Promise.all(
             batch.map(async (calUrl) => {
               console.log(`Scraping CAL page: ${calUrl}`);
-              const proxyEndpoint = `${calProxyUrl}/?key=${calProxyKey}&url=${encodeURIComponent(calUrl)}`;
               try {
-                const calRes = await fetch(proxyEndpoint, {
-                  signal: AbortSignal.timeout(90000), // 90s per page
-                });
+                const calRes = await fetchViaProxy({ url: calProxyUrl, key: calProxyKey }, calUrl, 90000);
                 if (!calRes.ok) {
                   console.error(`Failed to fetch CAL page: ${calUrl} — HTTP ${calRes.status}`);
                   return { url: calUrl, status: `http-${calRes.status}`, htmlLength: 0, discounts: [] };
@@ -494,12 +527,9 @@ Deno.serve(async (req) => {
           const batchResults = await Promise.all(
             batch.map(async ({ url, category }) => {
               try {
-                const proxyParams = new URLSearchParams({ key: calProxyKey, url });
-                const proxyRes = await fetch(`${calProxyUrl}/?${proxyParams.toString()}`, {
-                  signal: AbortSignal.timeout(60000),
-                });
+                const proxyRes = await fetchViaProxy({ url: calProxyUrl, key: calProxyKey }, url, 60000);
                 if (!proxyRes.ok) {
-                  console.error(`GCP proxy failed ${url}: HTTP ${proxyRes.status}`);
+                  console.error(`Proxy failed ${url}: HTTP ${proxyRes.status}`);
                   return { url, category, status: `http-${proxyRes.status}`, htmlLength: 0, discounts: [] };
                 }
                 const html = await proxyRes.text();

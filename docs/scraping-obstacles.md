@@ -114,6 +114,44 @@ Everything we hit, in the order we hit it:
 
 ---
 
+## The queue (PaisPlus only, so far)
+
+PaisPlus runs on an AWS queue instead of `scrape-oracle`. Everything else still
+uses the synchronous path. **A provider lives in exactly one of the two** —
+`QUEUE_MIGRATED` in `scrape-oracle/index.ts` and `PROVIDERS` in
+`scraper-service/dispatcher.js` must never both list it, or the two paths fight
+over the same rows. `scrape-oracle` returns 409 for a migrated slug.
+
+`EventBridge Scheduler (Sun 03:00 Asia/Jerusalem) → dispatcher → SQS → worker`
+
+- **Timezone, not UTC.** The schedule is pinned to `Asia/Jerusalem` so DST does
+  not silently move the run by an hour twice a year.
+- **One message per category page**, so a single bad page retries on its own
+  (3 attempts, then the DLQ) instead of failing the other 28.
+- **Run stamping.** Every row from one run shares a `scraped_at`. A delayed
+  `finalize` message retires the previous run's rows once the pages have landed;
+  deactivating per page would delete what the previous page just wrote.
+
+### Three guards worth keeping
+
+1. **An empty page is not a failure.** `paisplus.co.il/category/655` genuinely
+   has no benefits — its only `/product/` links are navigation chrome. Treating
+   0 as an error pushed a healthy page into the DLQ every run.
+2. **An empty *run* is a failure.** `finalize` refuses to retire the old rows if
+   the run produced none, or fewer than half the previous run. This is the net
+   under guard 1, and it has already fired for real: when the unique index was
+   wrong, every insert failed and the guard saved 763 live rows.
+3. **Inserts are idempotent.** A unique index on
+   `(membership_id, title, scraped_at)` plus `on_conflict=…&resolution=ignore-duplicates`.
+   This fixes two things at once: a benefit listed under 14 category pages
+   inserting 14 times, and SQS redelivering a job that already inserted.
+
+**The index must not be partial.** A `WHERE scraped_at IS NOT NULL` predicate
+made every insert fail with `42P10` — Postgres will not match `ON CONFLICT`
+against a partial index, and PostgREST cannot send the predicate. The predicate
+was pointless anyway: NULLs are distinct in a unique index by default, so
+hand-entered rows are unconstrained either way.
+
 ## Next steps
 
 Ordered by urgency, following the loss of the VM:

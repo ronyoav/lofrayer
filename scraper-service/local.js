@@ -46,7 +46,7 @@ const server = http.createServer(async (req, res) => {
       waitForSelector: url.searchParams.get('selector') || null,
       blockAssets: url.searchParams.get('assets') !== '1',
     });
-    console.log(`${target} → HTTP ${status}, ${html.length} chars, ${Date.now() - started}ms`);
+    console.log(`${target}: HTTP ${status}, ${html.length} chars, ${Date.now() - started}ms`);
     send(200, html, { 'Content-Type': 'text/html; charset=utf-8' });
   } catch (err) {
     console.error(`Fetch failed for ${target}: ${err.message}`);
