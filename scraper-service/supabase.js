@@ -47,11 +47,17 @@ async function getMembership(slug) {
  * in deactivateStale(). Doing it per page would delete the rows the previous
  * page just wrote.
  */
-async function insertDiscounts(rows, membershipId, runId) {
+// `defaults` carries the per-provider fallbacks the old scrape-oracle applied
+// inline at each insert site — Isracard defaulted brand to 'ישראכרט', CAL to
+// 'כאל', and so on. Folding every provider into one generic insert quietly
+// dropped them; an equivalence check caught an Isracard card whose
+// caption-sub-title is empty, which used to become 'ישראכרט' and would have
+// become null. Falsy, not nullish: an empty string must fall through too.
+async function insertDiscounts(rows, membershipId, runId, defaults = {}) {
   if (!rows.length) return 0;
 
   const payload = rows.map((d) => ({
-    brand: d.brand || null,
+    brand: d.brand || defaults.brand || null,
     brand_logo_url: d.brand_logo_url || null,
     title: d.title || '',
     // `||`, not `??`: the Deno original collapsed empty strings to null. An
@@ -61,7 +67,7 @@ async function insertDiscounts(rows, membershipId, runId) {
     discount_value: d.discount_value || '',
     category: d.category || 'כללי',
     location: d.location || 'כל הארץ',
-    redeem_url: d.redeem_url || null,
+    redeem_url: d.redeem_url || defaults.redeem_url || null,
     membership_id: membershipId,
     scraped_at: runId,
     is_active: true,

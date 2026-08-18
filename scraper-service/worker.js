@@ -11,14 +11,31 @@ const { fetchPage } = require('./fetch-page');
 const { insertDiscounts, deactivateStale, countActive, countStalePending } = require('./supabase');
 const { extractPaisPlusBenefits } = require('./parsers/paisplus');
 const { extractCalBenefits } = require('./parsers/cal');
+const { extractIsracardBenefits } = require('./parsers/isracard');
 
 // Each extractor takes (html, X) but they disagree on what X is, because they
 // were written independently against different sites. Rather than rewrite them
 // — and risk changing output the equivalence checks pinned — each provider
 // declares what its second argument should be.
+// `defaults` mirrors the per-provider fallbacks scrape-oracle applied inline at
+// each insert site. Without them a benefit whose brand element is empty loses
+// its provider name — see insertDiscounts.
 const PARSERS = {
-  pais: { parse: extractPaisPlusBenefits, secondArg: (job) => job.category },
-  cal: { parse: extractCalBenefits, secondArg: (job) => job.url },
+  pais: {
+    parse: extractPaisPlusBenefits,
+    secondArg: (job) => job.category,
+    defaults: { brand: 'פיס פלוס' },
+  },
+  cal: {
+    parse: extractCalBenefits,
+    secondArg: (job) => job.url,
+    defaults: { brand: 'כאל' },
+  },
+  isracard: {
+    parse: extractIsracardBenefits,
+    secondArg: (job) => job.url,
+    defaults: { brand: 'ישראכרט' },
+  },
 };
 
 async function handlePage(job) {
@@ -49,7 +66,7 @@ async function handlePage(job) {
     return 0;
   }
 
-  const inserted = await insertDiscounts(rows, job.membershipId, job.runId);
+  const inserted = await insertDiscounts(rows, job.membershipId, job.runId, parser.defaults);
   console.log(`${job.slug} ${job.url}: inserted ${inserted} benefits (run ${job.runId})`);
   return inserted;
 }
