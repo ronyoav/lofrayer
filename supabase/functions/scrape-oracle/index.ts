@@ -7,6 +7,19 @@ const corsHeaders = {
 
 const RATE_LIMIT_MAX = 10; // max requests per IP per minute
 
+// Scraper proxy — AWS Lambda in il-central-1. See scraper-service/README.md.
+// Deliberately no literal fallback: the previous default key was committed to
+// this repo and must be treated as public. A missing secret has to fail loudly
+// rather than silently authenticate with a known value.
+function getProxyConfig(): { url: string; key: string } {
+  const url = Deno.env.get('CAL_PROXY_URL');
+  const key = Deno.env.get('CAL_PROXY_KEY');
+  if (!url || !key) {
+    throw new Error('CAL_PROXY_URL and CAL_PROXY_KEY must both be set');
+  }
+  return { url: url.replace(/\/+$/, ''), key };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -110,9 +123,8 @@ Deno.serve(async (req) => {
         'https://benefits.isracard.co.il/parentcategories/online-benefits/',
         'https://benefits.isracard.co.il/parentcategories/cinema/',
       ];
-      const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
-      const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
-      console.log('Isracard detected — scraping multiple pages via GCP Puppeteer-Stealth proxy');
+      const { url: calProxyUrl, key: calProxyKey } = getProxyConfig();
+      console.log('Isracard detected — scraping multiple pages via Puppeteer-Stealth proxy');
 
       try {
         const allDiscounts: any[] = [];
@@ -226,9 +238,8 @@ Deno.serve(async (req) => {
         const seenTitles = new Set<string>();
         const calPageResults: any[] = [];
 
-        // VM proxy: Israeli IP bypasses MemCyco SDK that blocks WebScraping.ai
-        const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
-        const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+        // Israeli IP + Stealth bypasses the MemCyco SDK that blocks plain fetches
+        const { url: calProxyUrl, key: calProxyKey } = getProxyConfig();
 
         // Fetch pages in batches of 2 — avoids overwhelming proxy with 5 concurrent Puppeteer tabs
         console.log(`Fetching ${calUrls.length} CAL pages in batches of 2...`);
@@ -478,9 +489,8 @@ Deno.serve(async (req) => {
         for (let i = 0; i < paisPlusUrls.length; i += batchSize) {
           const batch = paisPlusUrls.slice(i, i + batchSize);
           console.log(`Batch ${Math.floor(i / batchSize) + 1}: fetching ${batch.length} PaisPlus pages`);
-          // PaisPlus geo-blocks non-Israeli IPs — route through GCP VM proxy (Israeli IP)
-          const calProxyUrl = Deno.env.get('CAL_PROXY_URL') || '';
-          const calProxyKey = Deno.env.get('CAL_PROXY_KEY') || 'lofrayer-cal-2024';
+          // PaisPlus geo-blocks non-Israeli IPs — route through the Israeli proxy
+          const { url: calProxyUrl, key: calProxyKey } = getProxyConfig();
           const batchResults = await Promise.all(
             batch.map(async ({ url, category }) => {
               try {
