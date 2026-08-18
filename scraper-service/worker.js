@@ -7,11 +7,12 @@
 // Fetching happens in-process against the Chromium in this image, not over
 // HTTP through API Gateway, so the 30s integration cap does not apply here.
 
-const { fetchPage } = require('./fetch-page');
+const { fetchPage, fetchDirect } = require('./fetch-page');
 const { insertDiscounts, deactivateStale, countActive, countStalePending } = require('./supabase');
 const { extractPaisPlusBenefits } = require('./parsers/paisplus');
 const { extractCalBenefits } = require('./parsers/cal');
 const { extractIsracardBenefits } = require('./parsers/isracard');
+const { extractYoursBenefits } = require('./parsers/yours');
 
 // Each extractor takes (html, X) but they disagree on what X is, because they
 // were written independently against different sites. Rather than rewrite them
@@ -36,14 +37,27 @@ const PARSERS = {
     secondArg: (job) => job.url,
     defaults: { brand: 'ישראכרט' },
   },
+  yours: {
+    parse: extractYoursBenefits,
+    secondArg: (job) => job.category,
+    defaults: { brand: 'שלך' },
+    // scrape-oracle hardcoded this, discarding the parser's short_description.
+    overrides: { description: null },
+  },
+  // Poalim Wonder is deliberately NOT here: bankhapoalim.co.il no longer emits
+  // the team-member-title elements its extractor requires, so the scraper has
+  // been silently broken since roughly 2026-08-01. Migrating it would just move
+  // a broken scraper onto a schedule. It needs a rewritten parser first.
 };
 
 async function handlePage(job) {
   const parser = PARSERS[job.slug];
   if (!parser) throw new Error(`No parser registered for slug '${job.slug}'`);
 
-  const { html, status } = await fetchPage(job.url);
-  console.log(`${job.slug} ${job.url}: HTTP ${status}, ${html.length} chars`);
+  // 'direct' skips Chromium entirely — see PROVIDERS in dispatcher.js.
+  const fetcher = job.mode === 'direct' ? fetchDirect : fetchPage;
+  const { html, status } = await fetcher(job.url);
+  console.log(`${job.slug} ${job.url}: HTTP ${status}, ${html.length} chars (${job.mode || 'browser'})`);
 
   // A challenge page or an unrendered shell still arrives as HTTP 200, so size
   // is the real signal that the fetch worked. Throwing sends the message back
@@ -66,7 +80,8 @@ async function handlePage(job) {
     return 0;
   }
 
-  const inserted = await insertDiscounts(rows, job.membershipId, job.runId, parser.defaults);
+  const defaults = { ...parser.defaults, ...(parser.rowDefaults ? parser.rowDefaults(job) : {}) };
+  const inserted = await insertDiscounts(rows, job.membershipId, job.runId, defaults, parser.overrides);
   console.log(`${job.slug} ${job.url}: inserted ${inserted} benefits (run ${job.runId})`);
   return inserted;
 }

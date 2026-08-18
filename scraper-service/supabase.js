@@ -35,7 +35,7 @@ async function request(path, init = {}) {
 }
 
 async function getMembership(slug) {
-  const res = await request(`memberships?select=id,name,slug&slug=eq.${encodeURIComponent(slug)}`);
+  const res = await request(`memberships?select=id,name,slug,scrape_url&slug=eq.${encodeURIComponent(slug)}`);
   const rows = await res.json();
   if (!rows.length) throw new Error(`Membership not found: ${slug}`);
   return rows[0];
@@ -53,7 +53,12 @@ async function getMembership(slug) {
 // dropped them; an equivalence check caught an Isracard card whose
 // caption-sub-title is empty, which used to become 'ישראכרט' and would have
 // become null. Falsy, not nullish: an empty string must fall through too.
-async function insertDiscounts(rows, membershipId, runId, defaults = {}) {
+// `overrides` force a column regardless of what the parser produced. Only one
+// provider needs it: scrape-oracle hardcoded `description: null` for Yours,
+// discarding the short_description its own parser extracts. Preserved so the
+// migration changes nothing — whether that hardcode was deliberate is a
+// separate question, and answering it should be its own change.
+async function insertDiscounts(rows, membershipId, runId, defaults = {}, overrides = {}) {
   if (!rows.length) return 0;
 
   const payload = rows.map((d) => ({
@@ -71,6 +76,7 @@ async function insertDiscounts(rows, membershipId, runId, defaults = {}) {
     membership_id: membershipId,
     scraped_at: runId,
     is_active: true,
+    ...overrides,
   }));
 
   // on_conflict + ignore-duplicates makes this idempotent against the unique

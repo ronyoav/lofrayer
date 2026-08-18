@@ -11,6 +11,7 @@ const { getMembership } = require('./supabase');
 const { PAISPLUS_PAGES } = require('./parsers/paisplus');
 const { CAL_PAGES } = require('./parsers/cal');
 const { ISRACARD_PAGES } = require('./parsers/isracard');
+const { YOURS_PAGES } = require('./parsers/yours');
 
 const sqs = new SQSClient({});
 const QUEUE_URL = process.env.JOB_QUEUE_URL;
@@ -23,10 +24,19 @@ const FINALIZE_DELAY_SECONDS = Number(process.env.FINALIZE_DELAY_SECONDS || 600)
 // still served by the old synchronous path in scrape-oracle — a provider must
 // appear in exactly one of the two, never both, or they will fight over the
 // same rows.
+// `mode` decides how the worker fetches: 'browser' boots the Chromium in this
+// image (needed for bot protection or client-side rendering), 'direct' is a
+// plain HTTP request. Booting a browser for a server-rendered, unprotected site
+// costs seconds and hundreds of MB for nothing.
+//
+// Poalim Wonder is three membership slugs, one per section, each carrying its
+// own scrape_url on the memberships row — so its page comes from the database
+// rather than a list here.
 const PROVIDERS = {
-  pais: { pages: PAISPLUS_PAGES },
-  cal: { pages: CAL_PAGES },
-  isracard: { pages: ISRACARD_PAGES },
+  pais: { pages: PAISPLUS_PAGES, mode: 'browser' },
+  cal: { pages: CAL_PAGES, mode: 'browser' },
+  isracard: { pages: ISRACARD_PAGES, mode: 'browser' },
+  yours: { pages: YOURS_PAGES, mode: 'direct' },
 };
 
 async function enqueueAll(messages) {
@@ -65,7 +75,15 @@ exports.handler = async (event = {}) => {
 
     const membership = await getMembership(slug);
 
-    const pageJobs = provider.pages.map((p) => ({
+    const pages = provider.pagesFromMembership
+      ? [{ url: membership.scrape_url }]
+      : provider.pages;
+
+    if (provider.pagesFromMembership && !membership.scrape_url) {
+      throw new Error(`Membership '${slug}' has no scrape_url to dispatch`);
+    }
+
+    const pageJobs = pages.map((p) => ({
       body: {
         type: 'page',
         slug,
@@ -73,6 +91,7 @@ exports.handler = async (event = {}) => {
         membershipId: membership.id,
         url: p.url,
         category: p.category,
+        mode: provider.mode,
       },
     }));
 
