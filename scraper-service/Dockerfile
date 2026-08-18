@@ -42,6 +42,7 @@ ENV PUPPETEER_CACHE_DIR=/opt/puppeteer
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY index.js browser.js fetch-page.js smoke-test.js ./
+COPY index.js browser.js fetch-page.js smoke-test.js supabase.js dispatcher.js worker.js ./
+COPY parsers ./parsers
 
 CMD [ "index.handler" ]

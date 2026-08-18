@@ -115,7 +115,7 @@ exports.handler = async (event) => {
     });
 
     console.log(
-      `Fetched ${params.url} → HTTP ${status}, ${html.length} chars, ${Date.now() - started}ms`
+      `Fetched ${params.url}: HTTP ${status}, ${html.length} chars, ${Date.now() - started}ms`
     );
 
     if (html.length < 1000) {

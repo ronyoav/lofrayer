@@ -112,6 +112,22 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Providers that have moved to the AWS queue must not also run here — the
+    // two paths write the same rows and would fight over them. A provider lives
+    // in exactly one place: this list, or PROVIDERS in scraper-service/dispatcher.js.
+    const QUEUE_MIGRATED = ['pais', 'paisplus'];
+    if (QUEUE_MIGRATED.includes(membership.slug)) {
+      return new Response(
+        JSON.stringify({
+          error: `${membership.slug} is scraped by the AWS queue, not here.`,
+          schedule: 'Sundays 03:00 Asia/Jerusalem',
+          runOnDemand: 'aws lambda invoke --function-name lofrayer-scrape-dispatcher ' +
+            `--payload '{"slug":"${membership.slug}"}' --region il-central-1 out.json`,
+        }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const scrapeUrl = membership.scrape_url || 'https://www.behatsdaa.org.il/';
 
     // SSRF protection: only allow known Israeli benefit sites
