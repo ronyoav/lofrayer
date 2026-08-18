@@ -9,6 +9,7 @@
 const { SQSClient, SendMessageBatchCommand } = require('@aws-sdk/client-sqs');
 const { getMembership } = require('./supabase');
 const { PAISPLUS_PAGES } = require('./parsers/paisplus');
+const { CAL_PAGES } = require('./parsers/cal');
 
 const sqs = new SQSClient({});
 const QUEUE_URL = process.env.JOB_QUEUE_URL;
@@ -23,6 +24,7 @@ const FINALIZE_DELAY_SECONDS = Number(process.env.FINALIZE_DELAY_SECONDS || 600)
 // same rows.
 const PROVIDERS = {
   pais: { pages: PAISPLUS_PAGES },
+  cal: { pages: CAL_PAGES },
 };
 
 async function enqueueAll(messages) {

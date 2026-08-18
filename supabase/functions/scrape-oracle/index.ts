@@ -115,7 +115,11 @@ Deno.serve(async (req) => {
     // Providers that have moved to the AWS queue must not also run here — the
     // two paths write the same rows and would fight over them. A provider lives
     // in exactly one place: this list, or PROVIDERS in scraper-service/dispatcher.js.
-    const QUEUE_MIGRATED = ['pais', 'paisplus'];
+    // NOTE: the extractors for migrated providers are still below, now dead.
+    // They are kept deliberately during the migration so a provider can be
+    // rolled back by removing it from this list alone. Delete them — and this
+    // note — once every provider has moved.
+    const QUEUE_MIGRATED = ['pais', 'paisplus', 'cal'];
     if (QUEUE_MIGRATED.includes(membership.slug)) {
       return new Response(
         JSON.stringify({

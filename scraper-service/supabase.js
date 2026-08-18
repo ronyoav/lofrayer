@@ -54,7 +54,10 @@ async function insertDiscounts(rows, membershipId, runId) {
     brand: d.brand || null,
     brand_logo_url: d.brand_logo_url || null,
     title: d.title || '',
-    description: d.description ?? null,
+    // `||`, not `??`: the Deno original collapsed empty strings to null. An
+    // equivalence check against CAL caught 14 rows where `??` would have
+    // stored "" instead. Keep the two paths byte-identical.
+    description: d.description || null,
     discount_value: d.discount_value || '',
     category: d.category || 'כללי',
     location: d.location || 'כל הארץ',

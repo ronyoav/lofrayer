@@ -10,14 +10,20 @@
 const { fetchPage } = require('./fetch-page');
 const { insertDiscounts, deactivateStale, countActive, countStalePending } = require('./supabase');
 const { extractPaisPlusBenefits } = require('./parsers/paisplus');
+const { extractCalBenefits } = require('./parsers/cal');
 
+// Each extractor takes (html, X) but they disagree on what X is, because they
+// were written independently against different sites. Rather than rewrite them
+// — and risk changing output the equivalence checks pinned — each provider
+// declares what its second argument should be.
 const PARSERS = {
-  pais: extractPaisPlusBenefits,
+  pais: { parse: extractPaisPlusBenefits, secondArg: (job) => job.category },
+  cal: { parse: extractCalBenefits, secondArg: (job) => job.url },
 };
 
 async function handlePage(job) {
-  const parse = PARSERS[job.slug];
-  if (!parse) throw new Error(`No parser registered for slug '${job.slug}'`);
+  const parser = PARSERS[job.slug];
+  if (!parser) throw new Error(`No parser registered for slug '${job.slug}'`);
 
   const { html, status } = await fetchPage(job.url);
   console.log(`${job.slug} ${job.url}: HTTP ${status}, ${html.length} chars`);
@@ -29,7 +35,7 @@ async function handlePage(job) {
     throw new Error(`Suspiciously short HTML (${html.length} chars) for ${job.url}`);
   }
 
-  const rows = parse(html, job.category);
+  const rows = parser.parse(html, parser.secondArg(job));
 
   // An empty category is legitimate — paisplus.co.il/category/655 has no
   // benefits at all, and its only /product/ links are navigation chrome.
