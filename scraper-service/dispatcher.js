@@ -17,9 +17,18 @@ const { MAX_CATEGORIES } = require('./parsers/max');
 const sqs = new SQSClient({});
 const QUEUE_URL = process.env.JOB_QUEUE_URL;
 
-// How long to wait before retiring the old rows. Must comfortably exceed the
-// time for every page job to finish; SQS caps per-message delay at 900s.
-const FINALIZE_DELAY_SECONDS = Number(process.env.FINALIZE_DELAY_SECONDS || 600);
+// How long to wait before retiring the old rows. SQS has no "wait for these
+// jobs to finish" primitive, so the finalize message is simply delayed past the
+// point where every page job should have landed. Too short and it counts a
+// partial run and refuses — or worse, retires good rows against a partial count.
+//
+// 600s is sized for the widest provider (PaisPlus, 29 pages). A single-page
+// provider does not need it, and a manual test run certainly does not, so the
+// dispatch event can override it. The env var stays the production default:
+// changing that instead would leave the weekly run short if anyone forgot to
+// put it back.
+const DEFAULT_FINALIZE_DELAY_SECONDS = Number(process.env.FINALIZE_DELAY_SECONDS || 600);
+const MAX_SQS_DELAY_SECONDS = 900;
 
 // Providers that have been migrated to the queue. Anything not listed here is
 // still served by the old synchronous path in scrape-oracle — a provider must
@@ -45,6 +54,11 @@ const PROVIDERS = {
     pages: MAX_CATEGORIES.map((c) => ({ apiCategory: c.slug, category: c.category })),
     mode: 'api',
   },
+  // Browser mode: a plain request gets a 307 and the payload only arrives after
+  // the redirect chain, which the browser path already handles reliably.
+  'poalim-wonder': { pagesFromMembership: true, mode: 'browser' },
+  'poalim-wonder-food': { pagesFromMembership: true, mode: 'browser' },
+  'poalim-wonder-movies': { pagesFromMembership: true, mode: 'browser' },
 };
 
 async function enqueueAll(messages) {
@@ -72,6 +86,11 @@ exports.handler = async (event = {}) => {
 
   // Allow a manual run of one provider; default to every migrated provider.
   const slugs = event.slug ? [event.slug] : Object.keys(PROVIDERS);
+
+  const finalizeDelay = Math.min(
+    Math.max(Number(event.finalizeDelaySeconds) || DEFAULT_FINALIZE_DELAY_SECONDS, 0),
+    MAX_SQS_DELAY_SECONDS
+  );
   const runId = new Date().toISOString();
   const summary = [];
 
@@ -107,13 +126,13 @@ exports.handler = async (event = {}) => {
     // Retiring the old rows is itself a queue message, so it inherits the same
     // retry and dead-letter behaviour as the page jobs.
     const finalizeJob = {
-      delaySeconds: FINALIZE_DELAY_SECONDS,
+      delaySeconds: finalizeDelay,
       body: { type: 'finalize', slug, runId, membershipId: membership.id, expectedPages: pageJobs.length },
     };
 
     await enqueueAll([...pageJobs, finalizeJob]);
 
-    console.log(`Enqueued ${pageJobs.length} page jobs for ${slug} (run ${runId})`);
+    console.log(`Enqueued ${pageJobs.length} page jobs for ${slug} (run ${runId}), finalize in ${finalizeDelay}s`);
     summary.push({ slug, pages: pageJobs.length });
   }
 

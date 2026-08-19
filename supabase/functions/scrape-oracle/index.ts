@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
     // They are kept deliberately during the migration so a provider can be
     // rolled back by removing it from this list alone. Delete them — and this
     // note — once every provider has moved.
-    const QUEUE_MIGRATED = ['pais', 'paisplus', 'cal', 'isracard', 'iscard', 'isracard-benefits', 'yours', 'max'];
+    const QUEUE_MIGRATED = ['pais', 'paisplus', 'cal', 'isracard', 'iscard', 'isracard-benefits', 'yours', 'max', 'poalim-wonder', 'poalim-wonder-food', 'poalim-wonder-movies'];
     if (QUEUE_MIGRATED.includes(membership.slug)) {
       return new Response(
         JSON.stringify({

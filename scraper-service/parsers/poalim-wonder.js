@@ -1,63 +1,144 @@
 'use strict';
 
-// Ported verbatim from extractPoalimWonderBenefits() in scrape-oracle.
+// REWRITTEN 2026-08-19. bankhapoalim.co.il was rebuilt as a Next.js app, and
+// the previous extractor — which looked for .team-member / .team-member-title
+// blocks — silently returned nothing from roughly 2026-08-01 onward. The app
+// served 18-day-old benefits as current until the queue migration caught it.
 //
-// A plain public Drupal site: server-rendered, no protections, no browser
-// needed. Card structure:
-//   <div class="team-member with-img">
-//     <img class="team-member-img" src="URL">
-//     <div class="team-member-title">BRAND</div>
-//     <div class="team-member-subtitle">שובר בשווי 250₪\nתמורת 199₪ + 25 נקודות</div>
-//   </div>
+// The rebuild is an improvement for us. Only a handful of cards are rendered
+// into HTML (the rest sit behind tabs), but every benefit is present in the
+// React Server Components payload as a named object:
 //
-// Unlike the other providers, Poalim Wonder is split across three membership
-// slugs, one per section, each with its own scrape_url on the memberships row.
-// The dispatcher reads that rather than holding a hardcoded page list.
+//   { label, bigTitle, subtitle, image: { src }, link, checkbox, popup }
+//
+// Reading that instead of the markup means a future restyle cannot break us
+// the way this one did — the same reasoning as the MAX API parser.
+
+const BASE = 'https://www.bankhapoalim.co.il';
+
+/**
+ * Next.js streams its payload as a series of self.__next_f.push([1, "chunk"])
+ * calls whose decoded strings concatenate into one flight stream.
+ */
+function flightStream(html) {
+  const re = /self\.__next_f\.push\(\[1,\s*("(?:[^"\\]|\\.)*")\]\)/g;
+  let match;
+  let stream = '';
+  while ((match = re.exec(html)) !== null) {
+    try {
+      stream += JSON.parse(match[1]);
+    } catch {
+      // A chunk that will not decode is not worth failing the whole page over.
+    }
+  }
+  return stream;
+}
+
+/**
+ * Pull out the balanced JSON object that starts at `openIndex`.
+ * Returns null if it does not parse — the flight stream is not valid JSON as a
+ * whole, so only the individual objects can be trusted.
+ */
+function objectAt(stream, openIndex) {
+  let depth = 0;
+  for (let i = openIndex; i < stream.length; i++) {
+    if (stream[i] === '{') depth++;
+    else if (stream[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(stream.substring(openIndex, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Walk back from `idx` to the '{' that opens the object containing it. */
+function enclosingObjectStart(stream, idx) {
+  let depth = 0;
+  for (let i = idx; i >= 0; i--) {
+    if (stream[i] === '}') depth++;
+    else if (stream[i] === '{') {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+function categoryFor(text) {
+  const t = text.toLowerCase();
+  if (/מסעד|אוכל|קפה|פיצ|סושי|המבורג|מזון/.test(t)) return 'מזון';
+  if (/קולנוע|סרט|בידור|תיאטרון/.test(t)) return 'בידור';
+  if (/ספא|יופי|שיער|בריאות|כושר|ספורט/.test(t)) return 'בריאות';
+  if (/אופנה|ביגוד|נעל|תיק/.test(t)) return 'אופנה';
+  if (/נסיע|טיסה|מלון|תיירות/.test(t)) return 'תיירות';
+  if (/קניות|שופינג|שובר/.test(t)) return 'קניות';
+  return 'כללי';
+}
 
 function extractPoalimWonderBenefits(html, _baseUrl) {
+  const stream = flightStream(html);
   const discounts = [];
   const seen = new Set();
-  const base = 'https://www.bankhapoalim.co.il';
 
-  const blockRegex = /<div[^>]+class="[^"]*team-member[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-  let match;
+  // Every benefit card object carries a bigTitle. Anchor on that rather than on
+  // any styling class, which is what made the old parser fragile.
+  const marker = '"bigTitle":';
+  let pos = 0;
 
-  while ((match = blockRegex.exec(html)) !== null) {
-    const inner = match[1];
+  while ((pos = stream.indexOf(marker, pos)) !== -1) {
+    const start = enclosingObjectStart(stream, pos);
+    pos += marker.length;
+    if (start === -1) continue;
 
-    const titleMatch = inner.match(/class="[^"]*team-member-title[^"]*"[^>]*>([\s\S]*?)<\/(?:div|h2|h3|p)>/i);
-    if (!titleMatch) continue;
-    const brand = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+    const obj = objectAt(stream, start);
+    if (!obj) continue;
+
+    // Next.js writes the literal string "$undefined" for absent props.
+    const brand = typeof obj.bigTitle === 'string' && obj.bigTitle !== '$undefined'
+      ? obj.bigTitle.trim()
+      : '';
+    const subtitle = typeof obj.subtitle === 'string' && obj.subtitle !== '$undefined'
+      ? obj.subtitle.trim()
+      : '';
+
     if (!brand || seen.has(brand)) continue;
     seen.add(brand);
 
-    const subtitleMatch = inner.match(/<div[^>]+class="[^"]*team-member-subtitle[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    const subtitleRaw = subtitleMatch ? subtitleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-    const title = subtitleRaw.split('\n')[0].trim() || brand;
-    const discount_value = subtitleRaw || 'הטבה';
+    // Title is the brand, not the offer text. Poalim reuses identical offer
+    // wording across merchants — "זוג כרטיסים לסרט ... תמורת 48.00 ₪ + 25 נקודות"
+    // is shared by two cinema chains — and the unique index keys on
+    // (membership_id, title, scraped_at), so offer-as-title silently collapsed
+    // distinct benefits into one row. The offer text goes to discount_value,
+    // which is where the old path meant to put it and never managed to.
+    const title = brand;
+    const discount_value = subtitle || 'הטבה';
 
-    const imgMatch =
-      inner.match(/<img[^>]+class="[^"]*team-member-img[^"]*"[^>]+src="([^"]+)"/i) ||
-      inner.match(/src="([^"]+)"[^>]+class="[^"]*team-member-img[^"]*"/i);
-    const brand_logo_url = imgMatch
-      ? imgMatch[1].startsWith('http')
-        ? imgMatch[1]
-        : `${base}${imgMatch[1]}`
+    const src = obj.image?.src;
+    const brand_logo_url = src
+      ? src.startsWith('http')
+        ? src
+        : `${BASE}${src}`
       : null;
 
-    let category = 'כללי';
-    const text = (brand + ' ' + title).toLowerCase();
-    if (/מסעד|אוכל|קפה|פיצ|סושי|המבורג|מזון/.test(text)) category = 'מזון';
-    else if (/קולנוע|סרט|בידור|תיאטרון/.test(text)) category = 'בידור';
-    else if (/ספא|יופי|שיער|בריאות|כושר|ספורט/.test(text)) category = 'בריאות';
-    else if (/אופנה|ביגוד|נעל|תיק/.test(text)) category = 'אופנה';
-    else if (/נסיע|טיסה|מלון|תיירות/.test(text)) category = 'תיירות';
-    else if (/קניות|שופינג|שובר/.test(text)) category = 'קניות';
-
-    discounts.push({ brand, brand_logo_url, title, discount_value, category });
+    discounts.push({
+      brand,
+      brand_logo_url,
+      title,
+      discount_value,
+      // Classify on the offer text, not the title — the title is the brand, so
+      // brand+title carries no signal ("WOLT WOLT"). The offer wording is where
+      // "סרט", "שובר" and the rest actually appear.
+      category: categoryFor(`${brand} ${discount_value}`),
+    });
   }
 
   return discounts;
 }
 
-module.exports = { extractPoalimWonderBenefits };
+module.exports = { extractPoalimWonderBenefits, flightStream };

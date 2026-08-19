@@ -14,6 +14,7 @@ const { extractCalBenefits } = require('./parsers/cal');
 const { extractIsracardBenefits } = require('./parsers/isracard');
 const { extractYoursBenefits } = require('./parsers/yours');
 const { fetchMaxCategory } = require('./parsers/max');
+const { extractPoalimWonderBenefits } = require('./parsers/poalim-wonder');
 
 // Each extractor takes (html, X) but they disagree on what X is, because they
 // were written independently against different sites. Rather than rewrite them
@@ -53,10 +54,20 @@ const PARSERS = {
     defaults: { brand: 'מקס' },
     overrides: { description: null },
   },
-  // Poalim Wonder is deliberately NOT here: bankhapoalim.co.il no longer emits
-  // the team-member-title elements its extractor requires, so the scraper has
-  // been silently broken since roughly 2026-08-01. Migrating it would just move
-  // a broken scraper onto a schedule. It needs a rewritten parser first.
+  // Rewritten 2026-08-19 against the Next.js payload after the site was rebuilt.
+  // All three sections share one parser; the section is the membership.
+  ...Object.fromEntries(
+    ['poalim-wonder', 'poalim-wonder-food', 'poalim-wonder-movies'].map((slug) => [
+      slug,
+      {
+        parse: extractPoalimWonderBenefits,
+        secondArg: (job) => job.url,
+        defaults: { brand: 'פועלים Wonder' },
+        // The extractor emits no redeem_url; the old path used the page URL.
+        rowDefaults: (job) => ({ redeem_url: job.url }),
+      },
+    ])
+  ),
 };
 
 async function handlePage(job) {
