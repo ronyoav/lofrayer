@@ -13,6 +13,7 @@ const { extractPaisPlusBenefits } = require('./parsers/paisplus');
 const { extractCalBenefits } = require('./parsers/cal');
 const { extractIsracardBenefits } = require('./parsers/isracard');
 const { extractYoursBenefits } = require('./parsers/yours');
+const { fetchMaxCategory } = require('./parsers/max');
 
 // Each extractor takes (html, X) but they disagree on what X is, because they
 // were written independently against different sites. Rather than rewrite them
@@ -44,6 +45,14 @@ const PARSERS = {
     // scrape-oracle hardcoded this, discarding the parser's short_description.
     overrides: { description: null },
   },
+  // MAX fetches its own data: it reads a JSON API and paginates until the API
+  // says it is done, so there is no HTML to hand a parser. `collect` replaces
+  // the fetch-then-parse pair for providers shaped like this.
+  max: {
+    collect: fetchMaxCategory,
+    defaults: { brand: 'מקס' },
+    overrides: { description: null },
+  },
   // Poalim Wonder is deliberately NOT here: bankhapoalim.co.il no longer emits
   // the team-member-title elements its extractor requires, so the scraper has
   // been silently broken since roughly 2026-08-01. Migrating it would just move
@@ -54,19 +63,29 @@ async function handlePage(job) {
   const parser = PARSERS[job.slug];
   if (!parser) throw new Error(`No parser registered for slug '${job.slug}'`);
 
-  // 'direct' skips Chromium entirely — see PROVIDERS in dispatcher.js.
-  const fetcher = job.mode === 'direct' ? fetchDirect : fetchPage;
-  const { html, status } = await fetcher(job.url);
-  console.log(`${job.slug} ${job.url}: HTTP ${status}, ${html.length} chars (${job.mode || 'browser'})`);
+  const label = job.url || job.apiCategory;
+  let rows;
 
-  // A challenge page or an unrendered shell still arrives as HTTP 200, so size
-  // is the real signal that the fetch worked. Throwing sends the message back
-  // for a retry.
-  if (html.length < 1000) {
-    throw new Error(`Suspiciously short HTML (${html.length} chars) for ${job.url}`);
+  if (parser.collect) {
+    // Provider reads a structured API and does its own paging — no page to
+    // fetch, and no HTML-length sanity check to make.
+    rows = await parser.collect({ slug: job.apiCategory, category: job.category });
+    console.log(`${job.slug} ${label}: ${rows.length} benefits from the API`);
+  } else {
+    // 'direct' skips Chromium entirely — see PROVIDERS in dispatcher.js.
+    const fetcher = job.mode === 'direct' ? fetchDirect : fetchPage;
+    const { html, status } = await fetcher(job.url);
+    console.log(`${job.slug} ${job.url}: HTTP ${status}, ${html.length} chars (${job.mode || 'browser'})`);
+
+    // A challenge page or an unrendered shell still arrives as HTTP 200, so size
+    // is the real signal that the fetch worked. Throwing sends the message back
+    // for a retry.
+    if (html.length < 1000) {
+      throw new Error(`Suspiciously short HTML (${html.length} chars) for ${job.url}`);
+    }
+
+    rows = parser.parse(html, parser.secondArg(job));
   }
-
-  const rows = parser.parse(html, parser.secondArg(job));
 
   // An empty category is legitimate — paisplus.co.il/category/655 has no
   // benefits at all, and its only /product/ links are navigation chrome.
@@ -76,13 +95,13 @@ async function handlePage(job) {
   // everywhere — is caught one level up, where handleFinalize compares the
   // whole run against what it is about to retire.
   if (rows.length === 0) {
-    console.warn(`${job.slug} ${job.url}: 0 benefits parsed from ${html.length} chars (empty category?)`);
+    console.warn(`${job.slug} ${label}: 0 benefits parsed (empty category?)`);
     return 0;
   }
 
   const defaults = { ...parser.defaults, ...(parser.rowDefaults ? parser.rowDefaults(job) : {}) };
   const inserted = await insertDiscounts(rows, job.membershipId, job.runId, defaults, parser.overrides);
-  console.log(`${job.slug} ${job.url}: inserted ${inserted} benefits (run ${job.runId})`);
+  console.log(`${job.slug} ${label}: inserted ${inserted} benefits (run ${job.runId})`);
   return inserted;
 }
 

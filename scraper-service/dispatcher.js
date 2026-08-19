@@ -12,6 +12,7 @@ const { PAISPLUS_PAGES } = require('./parsers/paisplus');
 const { CAL_PAGES } = require('./parsers/cal');
 const { ISRACARD_PAGES } = require('./parsers/isracard');
 const { YOURS_PAGES } = require('./parsers/yours');
+const { MAX_CATEGORIES } = require('./parsers/max');
 
 const sqs = new SQSClient({});
 const QUEUE_URL = process.env.JOB_QUEUE_URL;
@@ -37,6 +38,13 @@ const PROVIDERS = {
   cal: { pages: CAL_PAGES, mode: 'browser' },
   isracard: { pages: ISRACARD_PAGES, mode: 'browser' },
   yours: { pages: YOURS_PAGES, mode: 'direct' },
+  // MAX has no page list: each job is one API category, and the worker pages
+  // through it until the API says it is done. Page count is only discoverable
+  // by walking, so it cannot be split further up front.
+  max: {
+    pages: MAX_CATEGORIES.map((c) => ({ apiCategory: c.slug, category: c.category })),
+    mode: 'api',
+  },
 };
 
 async function enqueueAll(messages) {
@@ -90,6 +98,7 @@ exports.handler = async (event = {}) => {
         runId,
         membershipId: membership.id,
         url: p.url,
+        apiCategory: p.apiCategory,
         category: p.category,
         mode: provider.mode,
       },
