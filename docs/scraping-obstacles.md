@@ -9,7 +9,7 @@ Orchestrator: `supabase/functions/scrape-oracle/index.ts`
 ## Status: infrastructure
 
 > **The GCP VM `israel-scraper-vm` (me-west1-b) is no longer running.**
-> Everything below that says "from the Israeli VM" describes the *previous* working setup. Any scraper that depended on an Israeli IP or on a locally launched Puppeteer is currently broken and needs a new host. See [Next steps](#next-steps).
+> Everything below that says "from the Israeli VM" describes the *previous* working setup. Those scrapers now run from an AWS Lambda container in `il-central-1` (Tel Aviv) — see [The queue](#the-queue).
 
 | Component | What it was | State |
 |---|---|---|
@@ -29,14 +29,14 @@ Scraper secrets live in Supabase Edge Function secrets, not in `.env`.
 
 ## Strategy per provider
 
-| Provider | Strategy | Primary obstacle | Needs the VM? |
+| Provider | Strategy | Primary obstacle | Needs Chromium? |
 |---|---|---|---|
-| CAL | Proxy + Stealth, **wait for `.categories__text`**, then parse | MemCyco anti-bot + client-side rendering | Yes |
-| Isracard | Proxy, parse HTML, Gemini fallback | Cloudflare + geo-block | Yes |
-| PaisPlus | Proxy, parse HTML | Geo-block | Yes |
+| CAL | Stealth, **wait for `.categories__text`**, then parse | MemCyco anti-bot + client-side rendering | Yes |
+| Isracard | Parse HTML, Gemini fallback | Cloudflare + geo-block | Yes |
+| PaisPlus | Parse HTML | Geo-block | Yes |
 | MAX | Direct JSON API — no browser | *(none anymore)* | No |
 | Sheli ("שלך") | Direct fetch, read `__PRELOADED_STATE__` JSON | None — SSR, no protection | No |
-| Poalim Wonder | Direct fetch, parse HTML | None — Drupal, SSR | No |
+| Poalim Wonder | Browser: a plain request 307s and the payload only lands after the redirect chain | Redirect chain | Yes |
 | Behatzada | **No scraper — benefits entered by hand** | — | No |
 
 The three proxy-dependent providers all call the same `CAL_PROXY_URL`, so one host serves all three. Verified working end to end on 2026-08-18 against the AWS deployment: Isracard 82, CAL 107, PaisPlus 759.
@@ -114,10 +114,11 @@ Everything we hit, in the order we hit it:
 
 ---
 
-## The queue (PaisPlus only, so far)
+## The queue
 
-PaisPlus runs on an AWS queue instead of `scrape-oracle`. Everything else still
-uses the synchronous path. **A provider lives in exactly one of the two** —
+Six providers run on the AWS queue instead of `scrape-oracle`: `pais`, `cal`,
+`isracard`, `yours`, `max` and `poalim-wonder`. The rest still use the
+synchronous path. **A provider lives in exactly one of the two** —
 `QUEUE_MIGRATED` in `scrape-oracle/index.ts` and `PROVIDERS` in
 `scraper-service/dispatcher.js` must never both list it, or the two paths fight
 over the same rows. `scrape-oracle` returns 409 for a migrated slug.
@@ -152,14 +153,24 @@ against a partial index, and PostgREST cannot send the predicate. The predicate
 was pointless anyway: NULLs are distinct in a unique index by default, so
 hand-entered rows are unconstrained either way.
 
+---
+
+## Why Lambda did not break Stealth
+
+Lambda here is *not* a remote-browser service. The container carries its own
+Chromium and calls `puppeteer.launch()`, exactly as the VM did. What changed is
+the machine's lifetime, not the browser — which is what keeps StealthPlugin
+effective.
+
+Two fingerprint leaks the smoke test caught before deployment, both fixed:
+Chrome reported `HeadlessChrome` in its UA, and Stealth pinned
+`navigator.languages` to `en-US` — a US-English browser arriving from an
+Israeli IP at an Israel-only site. Neither would have been visible without
+testing for it.
+
+---
+
 ## Next steps
 
-Ordered by urgency, following the loss of the VM:
-
-1. **Migrate scraping to AWS.** *In progress.* The replacement lives in `scraper-service/` — an AWS Lambda container image for `il-central-1` (Tel Aviv) with Chromium baked in, launched locally under Stealth so CAL still works. The image builds and its fingerprint smoke test passes 8/8 locally; **not yet deployed** (no AWS account exists yet). Deploy steps are in `scraper-service/README.md`.
-
-   Two fingerprint leaks the smoke test caught and that are now fixed: Chrome reported `HeadlessChrome` in its UA, and Stealth pinned `navigator.languages` to `en-US` — a US-English browser arriving from an Israeli IP at an Israel-only site. Neither would have been visible without testing for it.
-
-   Note the shape: Lambda here is *not* a remote-browser service. The container carries its own Chromium and calls `puppeteer.launch()`, exactly as the VM did. What changed is the machine's lifetime, not the browser — which is what keeps StealthPlugin effective.
-2. **Add a queue system.** Natural fit on the same scraping code: decouple "schedule a scrape" from "run a scrape" so failures retry instead of dropping, and providers run independently.
-3. **Add text search over benefits.** The benefits are already in the database; search is the next layer on top of them.
+1. **Add text search over benefits.** The benefits are already in the database;
+   search is the next layer on top of them.
